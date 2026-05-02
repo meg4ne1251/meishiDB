@@ -1,0 +1,152 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: meishi
+      POSTGRES_PASSWORD: meishi
+      POSTGRES_DB: meishi
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meishi -d meishi"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  storage:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-meishi}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-meishi-storage-secret}
+    volumes:
+      - storage_data:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  search:
+    image: getmeili/meilisearch:v1.10
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-meili-master-key-change-me}
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - search_data:/meili_data
+    ports:
+      - "127.0.0.1:7700:7700"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  ocr:
+    build:
+      context: ../ocr
+    ports:
+      - "127.0.0.1:8001:8000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+  api:
+    build:
+      context: ../api
+    environment:
+      APP_ENV: development
+      SECRET_KEY: ${SECRET_KEY:-dev-only-insecure-secret-please-change}
+      DATABASE_URL: postgresql+asyncpg://meishi:meishi@db:5432/meishi
+      CORS_ORIGINS: http://localhost:3000
+      OCR_SERVICE_URL: http://ocr:8000
+      MEILISEARCH_URL: http://search:7700
+      MEILISEARCH_KEY: ${MEILI_MASTER_KEY:-meili-master-key-change-me}
+      MINIO_ENDPOINT: http://storage:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-meishi}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-meishi-storage-secret}
+      MINIO_BUCKET_ORIGINAL: cards-original
+      MINIO_BUCKET_THUMB: cards-thumb
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
+      WEBAUTHN_RP_NAME: meishiDB
+      WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:-http://localhost:3000}
+      SCANNER_API_TOKEN: ${SCANNER_API_TOKEN:-}
+      SCANNER_OWNER_EMAIL: ${SCANNER_OWNER_EMAIL:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+      search:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - ../api:/app
+
+  web:
+    build:
+      context: ../web
+      target: dev
+    environment:
+      NEXT_PUBLIC_API_URL: http://api:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api
+    volumes:
+      - ../web:/app
+      - /app/node_modules
+
+  # 任意起動：sheetfed scanner などが書き出すフォルダを監視して自動投入
+  # `docker compose --profile scanner up` で起動する
+  scanner-watcher:
+    profiles: ["scanner"]
+    build:
+      context: ../scanner-watcher
+    environment:
+      API_URL: http://api:8000
+      SCAN_DIR: /scans
+      SCAN_PROCESSED_DIR: /scans/_processed
+      SCAN_FAILED_DIR: /scans/_failed
+      SCANNER_API_TOKEN: ${SCANNER_API_TOKEN:-}
+    volumes:
+      - scanner_inbox:/scans
+    depends_on:
+      - api
+
+  # 公開ホスト用: `docker compose --profile proxy up` で起動
+  proxy:
+    profiles: ["proxy"]
+    image: caddy:2
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-meishi.local}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - web
+      - api
+
+volumes:
+  db_data:
+  storage_data:
+  search_data:
+  scanner_inbox:
+  caddy_data:
+  caddy_config:

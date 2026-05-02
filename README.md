@@ -1,0 +1,153 @@
+# meishiDB
+
+セルフホスト名刺管理ソフトウェア。Tailscale など VPN 越しの利用前提。
+
+詳細な設計は [`docs/architecture.md`](docs/architecture.md) を参照。
+
+## 構成サービス
+
+| サービス | 役割 | デフォルトポート |
+|---|---|---|
+| `web` | Next.js 15 / PWA / shadcn/ui | 3000 |
+| `api` | FastAPI / 認証 / CRUD / 監査 | 8000 |
+| `ocr` | PaddleOCR (PP-OCRv4 server, CPU) | 8001 |
+| `db` | PostgreSQL 16 | 5432 |
+| `search` | Meilisearch v1.10 | 7700 |
+| `storage` | MinIO（名刺画像） | 9000 / 9001 |
+| `scanner-watcher` | フォルダ監視 → 自動投入（任意） | — |
+| `proxy` | Caddy（公開ホスト用、任意） | 80 / 443 |
+
+すべてループバックにのみバインド。外部公開する場合は Caddy 経由 (`--profile proxy`) で 80/443 を開ける。
+
+## 機能
+
+- 認証
+  - パスワード（Argon2id） ＋ サーバ側セッション (HttpOnly Cookie)
+  - **パスキー (WebAuthn / py_webauthn 2.x)** 登録・ログイン
+- 名刺
+  - 手動 CRUD、タグ、お気に入り、明示共有 (view/edit)
+  - **画像アップロード**（front/back）→ サムネ自動生成（front, 512px WebP）
+  - **OCR**: front 画像アップロード時に同期実行、フィールド自動入力
+  - **検索**: Meilisearch（未配線時は Postgres ILIKE フォールバック）
+  - **エクスポート**: CSV / vCard 3.0
+  - **PWA**: manifest + service worker、`/scan` ショートカット
+  - **カメラ取り込み**: `<input capture="environment">` でモバイルのリアカメラ起動
+- スキャナ連携
+  - フォルダに置かれた画像を `scanner-watcher` が監視 → `/api/scanner/import` に POST
+- 監査ログ: `audit_logs` に append-only
+
+## 開発環境
+
+### Docker Compose（推奨）
+
+```bash
+cp deploy/env.example deploy/.env  # SECRET_KEY などを編集
+cd deploy
+docker compose up --build
+```
+
+| URL | 内容 |
+|---|---|
+| http://localhost:3000 | Web |
+| http://localhost:3000/scan | カメラスキャン |
+| http://localhost:3000/settings/passkeys | パスキー管理 |
+| http://localhost:8000/docs | FastAPI Swagger |
+| http://localhost:8001/healthz | OCR サービス |
+| http://localhost:9001 | MinIO 管理コンソール |
+| http://localhost:7700 | Meilisearch |
+
+最初に http://localhost:3000/register からアカウント作成。最初のユーザーは admin になる。
+
+> PaddleOCR の初回ビルドは CPU/ネットワーク次第で数分〜10 分以上かかる。`docker compose up ocr` だけ先に走らせておくとよい。
+
+### スキャナ連携を使う
+
+1. `deploy/.env` に `SCANNER_API_TOKEN` と `SCANNER_OWNER_EMAIL`（投入先ユーザー）を設定
+2. `docker compose --profile scanner up scanner-watcher`
+3. ホスト側のフォルダを `scanner_inbox` ボリュームにマウント、または `volumes:` を bind に変更
+
+### 公開ホスト用 Caddy
+
+```bash
+PUBLIC_HOST=meishi.example.com docker compose --profile proxy up -d
+```
+
+VPN 内ホスト名であれば Caddyfile の該当ホスト指定を `tls internal` 付きに変更。
+
+### ローカル直起動
+
+```bash
+# API
+cd api
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env
+alembic upgrade head
+uvicorn app.main:app --reload
+
+# Web
+cd ../web
+npm install
+cp .env.example .env.local
+npm run dev
+
+# OCR
+cd ../ocr
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+uvicorn app.main:app --reload --port 8001
+```
+
+## ディレクトリ
+
+```
+meishiDB/
+├── api/                # FastAPI
+│   ├── app/
+│   │   ├── core/       # config, db, security, logging
+│   │   ├── models/     # SQLAlchemy
+│   │   ├── schemas/    # Pydantic
+│   │   ├── routers/    # auth / webauthn / cards / tags / users / search / export / scanner
+│   │   └── services/   # audit, ocr_client, storage, search_index
+│   └── alembic/
+├── ocr/                # PaddleOCR FastAPI worker
+│   └── app/            # main / pipeline / extractors
+├── scanner-watcher/    # watchdog → /api/scanner/import
+├── web/                # Next.js (App Router)
+│   ├── app/            # /login /register /cards /scan /tags /settings/passkeys
+│   ├── components/     # ui, header, sw-register, card-image-capture
+│   ├── lib/            # api クライアント, webauthn ヘルパ, types
+│   └── public/         # manifest.webmanifest, sw.js, icon.svg
+├── deploy/             # docker-compose, Caddyfile, env.example
+└── docs/               # 設計ドキュメント
+```
+
+## セキュリティ運用ノート
+
+- `SECRET_KEY` / `MEILI_MASTER_KEY` / `MINIO_ROOT_PASSWORD` は十分に長いランダム文字列に置き換える
+- 本番では `APP_ENV=production` にして Secure Cookie を強制
+- WebAuthn は `WEBAUTHN_RP_ID` を本番ドメイン (例: `meishi.example.com`) に、`WEBAUTHN_ORIGIN` を `https://...` に設定
+- 公開 URL に出すなら Caddy + 自動 TLS（`deploy/Caddyfile`）
+- 監査ログ（`audit_logs` テーブル）は append-only。MVP では削除エンドポイント無し
+- `card.export` は監査ログに必ず記録される（CSV/vCard ともに）
+
+## 未実装 / 将来
+
+- 招待メール（SMTP）→ 現在は open registration、初回ユーザーのみ admin
+- 非同期 OCR キュー（ARQ / RQ）。現状は同期呼び出し（front アップロード時に約 5〜30 秒）
+- 管理者画面（ユーザー一覧、監査ログ閲覧 UI）
+- restic バックアップ運用
+- Android ネイティブ（Capacitor）
+
+## 動作確認チェックリスト
+
+- [ ] `docker compose up` で db / api / web / ocr / search / storage が起動する
+- [ ] `/register` で初回ユーザーを作成できる
+- [ ] `/login` でパスワードログイン → `/cards` にリダイレクト
+- [ ] `/settings/passkeys` でパスキーを登録 → ログアウト → `/login` で「パスキーでログイン」
+- [ ] `/scan` で写真を撮影 → 自動 OCR → `/cards/{id}` に着地、フィールドが埋まっている
+- [ ] `/cards/{id}` で表面/裏面の画像を後から差し替えできる、OCR 再実行ボタンが動く
+- [ ] `/cards` で検索（Meili）・タグフィルタ・お気に入りトグルが効く
+- [ ] CSV / vCard ボタンからダウンロードできる
+- [ ] 共有ダイアログから別ユーザーに view/edit 権限を付与できる
+- [ ] スキャナフォルダに画像を置くと `scanner-watcher` が POST して名刺が自動作成される
