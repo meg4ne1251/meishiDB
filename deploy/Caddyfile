@@ -14,10 +14,24 @@
         X-Content-Type-Options "nosniff"
         Referrer-Policy "strict-origin-when-cross-origin"
         Permissions-Policy "camera=(self), microphone=()"
+        # 地図: 既定はセルフホストのタイルサーバ('self')と MapLibre の web worker(blob:) のみ許可。
+        # 外部タイルホスト(例: 公開 OSM)を使う場合のみ、その https ホストを img-src と
+        # connect-src に明示追加すること（既定で外部送信が起きないようにしている）。
+        # script-src: MapLibre はラスタ描画に eval を必要としないため 'unsafe-eval' は付けない。
+        # 'unsafe-inline' は Next.js の起動用インラインスクリプト都合（将来 nonce 化したい）。
+        Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-ancestors 'none'"
     }
 
     handle /api/* {
         reverse_proxy api:8000
+    }
+
+    # 地図タイル（任意: `--profile tileserver` 起動時のみ）。
+    # 同一オリジンで配信することで CSP の `img-src 'self'` を満たし、外部送信ゼロを保つ。
+    # フロントは NEXT_PUBLIC_MAP_TILE_URL=/tiles/styles/basic/{z}/{x}/{y}.png を指す。
+    # handle_path が先頭の /tiles を除去するので tileserver には /styles/... が渡る。
+    handle_path /tiles/* {
+        reverse_proxy tileserver:8080
     }
 
     handle {
