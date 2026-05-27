@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, String, Text, text
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -53,6 +53,15 @@ class Card(Base):
 
 class CardField(Base):
     __tablename__ = "card_fields"
+    __table_args__ = (
+        # /cards/geo は座標を持つ行だけを引くので部分インデックスにする（migration 0003 と一致）。
+        Index(
+            "ix_card_fields_lat_lng",
+            "latitude",
+            "longitude",
+            postgresql_where=text("latitude IS NOT NULL AND longitude IS NOT NULL"),
+        ),
+    )
 
     card_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True
@@ -64,6 +73,9 @@ class CardField(Base):
     title: Mapped[str | None] = mapped_column(String)
     postal_code: Mapped[str | None] = mapped_column(String)
     address: Mapped[str | None] = mapped_column(String)
+    latitude: Mapped[float | None] = mapped_column(Float)
+    longitude: Mapped[float | None] = mapped_column(Float)
+    geocoded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     phone: Mapped[str | None] = mapped_column(String)
     mobile: Mapped[str | None] = mapped_column(String)
     fax: Mapped[str | None] = mapped_column(String)

@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
 
     ocr_service_url: str = "http://ocr:8000"
+
+    # 住所ジオコーディング（自前 Nominatim 等）。空なら無効。
+    geocoder_url: str = ""
+    geocoder_user_agent: str = "meishiDB/0.1 (self-hosted)"
+
     meilisearch_url: str = ""
     meilisearch_key: str = ""
     minio_endpoint: str = ""

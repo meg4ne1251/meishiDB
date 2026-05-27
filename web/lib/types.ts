@@ -23,8 +23,24 @@ export interface CardFields {
 }
 
 export interface CardFieldsRead extends CardFields {
+  latitude: number | null;
+  longitude: number | null;
   raw_ocr_text: string | null;
   ocr_confidence: Record<string, number> | null;
+}
+
+export interface CardGeoPoint {
+  id: string;
+  person_name: string | null;
+  company: string | null;
+  address: string | null;
+  latitude: number;
+  longitude: number;
+  shared: boolean;
+}
+
+export interface CardGeoResponse {
+  items: CardGeoPoint[];
 }
 
 export interface Tag {

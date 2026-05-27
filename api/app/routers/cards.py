@@ -1,8 +1,10 @@
+from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -17,7 +19,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.db import get_db
+from app.core.db import SessionLocal, get_db
 from app.core.logging import log
 from app.deps import get_current_user
 from app.models.card import Card, CardField, CardShare, CardTag, Favorite
@@ -27,6 +29,8 @@ from app.schemas.card import (
     CardCreate,
     CardDetail,
     CardFieldsRead,
+    CardGeoPoint,
+    CardGeoResponse,
     CardListResponse,
     CardSummary,
     CardUpdate,
@@ -34,9 +38,13 @@ from app.schemas.card import (
     ShareRequest,
     TagSummary,
 )
-from app.services import audit, ocr_client, search_index, storage
+from app.services import audit, geocoder, ocr_client, search_index, storage
 
 router = APIRouter(prefix="/cards", tags=["cards"])
+
+# 地図に一度に返すマーカー数の上限。これを超える規模ではクラスタリング等が必要だが、
+# まずは描画が破綻しないよう新しい順に上限件数で打ち切る。
+GEO_MAX_POINTS = 5000
 
 
 CARD_STATUSES = {"uploaded", "ocr_running", "ocr_done", "confirmed", "archived"}
@@ -89,6 +97,33 @@ async def _serialize(
         is_favorite=is_fav,
         shared=shared,
     )
+
+
+async def _geocode_card_in_background(card_id: UUID) -> None:
+    """住所から座標を補完する（best-effort）。レスポンス送出後に別セッションで実行する。
+
+    ジオコーダ呼び出しは遅い（自前 Nominatim で数百ms〜数秒）ため、作成/更新の
+    リクエスト処理をブロックしないようバックグラウンドで動かす。リクエストの
+    DB セッションは応答後に閉じているので、ここで専用のセッションを開く。
+    未設定・住所なし・失敗時は黙って何もしない。
+    """
+    if not geocoder.is_configured():
+        return
+    async with SessionLocal() as db:
+        card = await db.scalar(
+            select(Card).options(selectinload(Card.fields)).where(Card.id == card_id)
+        )
+        if card is None or card.fields is None:
+            return
+        address = card.fields.address
+        if not address or not address.strip():
+            return
+        coords = await geocoder.geocode(address)
+        if coords is None:
+            return
+        card.fields.latitude, card.fields.longitude = coords
+        card.fields.geocoded_at = datetime.now(timezone.utc)
+        await db.commit()
 
 
 async def _ensure_access(
@@ -196,6 +231,7 @@ async def list_cards(
 async def create_card(
     payload: CardCreate,
     request: Request,
+    background_tasks: BackgroundTasks,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CardDetail:
@@ -224,9 +260,52 @@ async def create_card(
     await db.refresh(card)
     card.fields = field
 
+    if geocoder.is_configured():
+        background_tasks.add_task(_geocode_card_in_background, card.id)
+
     summary = await _serialize(db, card, viewer_id=user.id)
     await search_index.upsert_card(card, field)
     return CardDetail(**summary.model_dump())
+
+
+@router.get("/geo", response_model=CardGeoResponse)
+async def list_card_geo(
+    scope: Literal["owned", "shared", "all"] = Query("owned"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CardGeoResponse:
+    """座標を持つ名刺だけを地図表示用に返す軽量エンドポイント。"""
+    shared_card_ids = (
+        select(CardShare.card_id).where(CardShare.shared_with == user.id).scalar_subquery()
+    )
+
+    stmt = (
+        select(Card, CardField)
+        .join(CardField, CardField.card_id == Card.id)
+        .where(CardField.latitude.isnot(None), CardField.longitude.isnot(None))
+    )
+    if scope == "owned":
+        stmt = stmt.where(Card.owner_id == user.id)
+    elif scope == "shared":
+        stmt = stmt.where(Card.id.in_(shared_card_ids))
+    else:
+        stmt = stmt.where(or_(Card.owner_id == user.id, Card.id.in_(shared_card_ids)))
+
+    stmt = stmt.order_by(Card.created_at.desc()).limit(GEO_MAX_POINTS)
+    rows = await db.execute(stmt)
+    items = [
+        CardGeoPoint(
+            id=card.id,
+            person_name=f.person_name,
+            company=f.company,
+            address=f.address,
+            latitude=f.latitude,
+            longitude=f.longitude,
+            shared=card.owner_id != user.id,
+        )
+        for card, f in rows.all()
+    ]
+    return CardGeoResponse(items=items)
 
 
 @router.get("/{card_id}", response_model=CardDetail)
@@ -257,6 +336,7 @@ async def update_card(
     card_id: UUID,
     payload: CardUpdate,
     request: Request,
+    background_tasks: BackgroundTasks,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CardDetail:
@@ -267,12 +347,22 @@ async def update_card(
             raise HTTPException(status_code=400, detail="invalid status")
         card.status = payload.status
 
+    should_geocode = False
     if payload.fields is not None:
         if card.fields is None:
             card.fields = CardField(card_id=card.id)
             db.add(card.fields)
-        for k, v in payload.fields.model_dump(exclude_unset=True).items():
+        changes = payload.fields.model_dump(exclude_unset=True)
+        address_changed = "address" in changes and changes["address"] != card.fields.address
+        for k, v in changes.items():
             setattr(card.fields, k, v)
+        # 古い座標を無効化するのはジオコーダが有効なとき「だけ」。
+        # 無効時に消すと再取得できず、地図に出ていた名刺が復旧手段なく消えてしまう。
+        if address_changed and geocoder.is_configured():
+            should_geocode = True
+            card.fields.latitude = None
+            card.fields.longitude = None
+            card.fields.geocoded_at = None
 
     if payload.tag_ids is not None:
         if shared:
@@ -293,6 +383,9 @@ async def update_card(
     )
     await db.commit()
     await db.refresh(card)
+
+    if should_geocode:
+        background_tasks.add_task(_geocode_card_in_background, card.id)
 
     summary = await _serialize(db, card, viewer_id=user.id, shared=shared)
     await search_index.upsert_card(card, card.fields)
@@ -469,6 +562,44 @@ async def rerun_ocr(
 
     summary = await _serialize(db, card, viewer_id=user.id)
     await search_index.upsert_card(card, card.fields)
+    return CardDetail(**summary.model_dump())
+
+
+@router.post("/{card_id}/geocode", response_model=CardDetail)
+async def geocode_card(
+    card_id: UUID,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CardDetail:
+    """カードの住所を再ジオコーディングして座標を更新する。"""
+    if not geocoder.is_configured():
+        raise HTTPException(status_code=503, detail="geocoder is not configured")
+
+    card, shared = await _ensure_access(db, card_id, user, need_edit=True)
+    address = (card.fields.address if card.fields else None) or ""
+    if not address.strip():
+        raise HTTPException(status_code=400, detail="no address to geocode")
+
+    coords = await geocoder.geocode(address)
+    if coords is None:
+        raise HTTPException(status_code=404, detail="address could not be geocoded")
+
+    card.fields.latitude, card.fields.longitude = coords
+    card.fields.geocoded_at = datetime.now(timezone.utc)
+
+    await audit.record(
+        db,
+        user_id=user.id,
+        action="card.geocode",
+        request=request,
+        target_type="card",
+        target_id=card.id,
+    )
+    await db.commit()
+    await db.refresh(card)
+
+    summary = await _serialize(db, card, viewer_id=user.id, shared=shared)
     return CardDetail(**summary.model_dump())
 
 

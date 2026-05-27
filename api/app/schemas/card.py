@@ -21,6 +21,8 @@ class CardFieldsBase(BaseModel):
 
 class CardFieldsRead(CardFieldsBase):
     model_config = ConfigDict(from_attributes=True)
+    latitude: float | None = None
+    longitude: float | None = None
     raw_ocr_text: str | None = None
     ocr_confidence: dict | None = None
 
@@ -67,6 +69,20 @@ class CardListResponse(BaseModel):
 
 class CardDetail(CardSummary):
     pass
+
+
+class CardGeoPoint(BaseModel):
+    id: UUID
+    person_name: str | None = None
+    company: str | None = None
+    address: str | None = None
+    latitude: float
+    longitude: float
+    shared: bool = False
+
+
+class CardGeoResponse(BaseModel):
+    items: list[CardGeoPoint]
 
 
 class ShareRequest(BaseModel):

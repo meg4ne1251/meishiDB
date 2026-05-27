@@ -29,6 +29,7 @@
   - **画像アップロード**（front/back）→ サムネ自動生成（front, 512px WebP）
   - **OCR**: front 画像アップロード時に同期実行、フィールド自動入力
   - **検索**: Meilisearch（未配線時は Postgres ILIKE フォールバック）
+  - **地図** (`/map`): MapLibre GL JS + OSM タイルで住所を地図表示。住所のジオコーディングは自前 Nominatim（任意・`--profile geocoder`）。未設定でも座標を持つ名刺は表示する
   - **エクスポート**: CSV / vCard 3.0
   - **PWA**: manifest + service worker、`/scan` ショートカット
   - **カメラ取り込み**: `<input capture="environment">` でモバイルのリアカメラ起動
@@ -50,6 +51,7 @@ docker compose up --build
 |---|---|
 | http://localhost:3000 | Web |
 | http://localhost:3000/scan | カメラスキャン |
+| http://localhost:3000/map | 名刺の地図表示 |
 | http://localhost:3000/settings/passkeys | パスキー管理 |
 | http://localhost:8000/docs | FastAPI Swagger |
 | http://localhost:8001/healthz | OCR サービス |

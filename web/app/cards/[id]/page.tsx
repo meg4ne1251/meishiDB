@@ -1,12 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Heart, RefreshCw, Share2, Trash2 } from "lucide-react";
+import { Heart, MapPin, RefreshCw, Share2, Trash2 } from "lucide-react";
 
 import { cardsApi, tagsApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -135,6 +136,13 @@ export default function CardDetailPage() {
   const rerunOcr = useMutation({
     mutationFn: () => cardsApi.rerunOcr(cardId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["card", cardId] }),
+  });
+  const geocode = useMutation({
+    mutationFn: () => cardsApi.geocode(cardId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["card", cardId] });
+      qc.invalidateQueries({ queryKey: ["cards", "geo"] });
+    },
   });
 
   if (isLoading) return <p className="text-sm text-muted-foreground">読み込み中...</p>;
@@ -285,6 +293,53 @@ export default function CardDetailPage() {
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>位置情報</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm text-muted-foreground">
+              {card.fields?.latitude != null && card.fields?.longitude != null ? (
+                <span className="font-mono text-xs">
+                  {card.fields.latitude.toFixed(5)}, {card.fields.longitude.toFixed(5)}
+                </span>
+              ) : (
+                "座標は未取得です"
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {card.fields?.latitude != null && (
+                <Button asChild type="button" size="sm" variant="ghost">
+                  <Link href="/map">
+                    <MapPin className="mr-1 h-3.5 w-3.5" /> 地図で見る
+                  </Link>
+                </Button>
+              )}
+              {!card.shared && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={geocode.isPending || !card.fields?.address}
+                  onClick={() => geocode.mutate()}
+                >
+                  <MapPin className="mr-1 h-3.5 w-3.5" />
+                  {geocode.isPending
+                    ? "取得中..."
+                    : card.fields?.latitude != null
+                      ? "座標を再取得"
+                      : "座標を取得"}
+                </Button>
+              )}
+            </div>
+            {geocode.isError && (
+              <p className="w-full text-xs text-destructive">
+                座標を取得できませんでした（住所が不正か、ジオコーダが無効の可能性があります）。
+              </p>
+            )}
           </CardContent>
         </Card>
 

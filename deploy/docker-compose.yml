@@ -69,6 +69,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://meishi:meishi@db:5432/meishi
       CORS_ORIGINS: http://localhost:3000
       OCR_SERVICE_URL: http://ocr:8000
+      GEOCODER_URL: ${GEOCODER_URL:-}
       MEILISEARCH_URL: http://search:7700
       MEILISEARCH_KEY: ${MEILI_MASTER_KEY:-meili-master-key-change-me}
       MINIO_ENDPOINT: http://storage:9000
@@ -101,6 +102,7 @@ services:
       target: dev
     environment:
       NEXT_PUBLIC_API_URL: http://api:8000
+      NEXT_PUBLIC_MAP_TILE_URL: ${NEXT_PUBLIC_MAP_TILE_URL:-}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -126,6 +128,37 @@ services:
     depends_on:
       - api
 
+  # 任意起動：住所→座標のジオコーディング（地図機能用）。
+  # `GEOCODER_URL=http://geocoder:8080 docker compose --profile geocoder up` で起動。
+  # 注意: 初回起動時に OSM 抽出データ（PBF）をインポートするため重く、時間もかかる。
+  # 日本のみで十分なので Geofabrik の japan-latest を既定にしている。
+  geocoder:
+    profiles: ["geocoder"]
+    image: mediagis/nominatim:4.4
+    environment:
+      PBF_URL: ${NOMINATIM_PBF_URL:-https://download.geofabrik.de/asia/japan-latest.osm.pbf}
+      NOMINATIM_PASSWORD: ${NOMINATIM_PASSWORD:-nominatim-change-me}
+      IMPORT_STYLE: address
+    volumes:
+      - geocoder_data:/var/lib/postgresql/14/main
+    ports:
+      - "127.0.0.1:8080:8080"
+    shm_size: 1gb
+
+  # 任意起動：セルフホストの地図タイルサーバ（地図機能用）。
+  # `docker compose --profile tileserver up` で起動し、フロントは
+  # NEXT_PUBLIC_MAP_TILE_URL=http://<ホスト>:8081/styles/basic/{z}/{x}/{y}.png を指す。
+  # 注意: タイルデータ(.mbtiles)は同梱しない（外部送信ゼロを保つための前提）。
+  # OpenMapTiles 等から取得した `tiles.mbtiles` を ./tiles に置いてから起動すること。
+  tileserver:
+    profiles: ["tileserver"]
+    image: maptiler/tileserver-gl:v4.11.0
+    command: ["--mbtiles", "/data/tiles.mbtiles"]
+    volumes:
+      - ./tiles:/data
+    ports:
+      - "127.0.0.1:8081:8080"
+
   # 公開ホスト用: `docker compose --profile proxy up` で起動
   proxy:
     profiles: ["proxy"]
@@ -148,5 +181,6 @@ volumes:
   storage_data:
   search_data:
   scanner_inbox:
+  geocoder_data:
   caddy_data:
   caddy_config:

@@ -7,6 +7,7 @@
 
 import type {
   Card,
+  CardGeoResponse,
   CardListResponse,
   CurrentUser,
   PasskeyCredential,
@@ -182,6 +183,9 @@ export const cardsApi = {
     return api<Card>(`/cards/${id}/image`, { method: "POST", body: fd, raw: true });
   },
   rerunOcr: (id: string) => api<Card>(`/cards/${id}/ocr`, { method: "POST" }),
+  geo: (scope: "owned" | "shared" | "all" = "owned", cookieHeader?: string) =>
+    api<CardGeoResponse>(`/cards/geo${qsFor({ scope })}`, { cookieHeader }),
+  geocode: (id: string) => api<Card>(`/cards/${id}/geocode`, { method: "POST" }),
   imageUrl: (id: string, side: "front" | "back" = "front", thumb = false) =>
     `/api/cards/${id}/image${qsFor({ side, thumb: thumb ? "true" : "" })}`,
 
@@ -205,7 +209,8 @@ export interface ExportParams {
 }
 
 export const exportApi = {
-  url: (p: ExportParams) => `/api/export/cards${qsFor(p as Record<string, unknown>)}`,
+  url: (p: ExportParams) =>
+    `/api/export/cards${qsFor(p as unknown as Record<string, unknown>)}`,
 };
 
 // ---- Tags ----

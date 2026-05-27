@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Camera, KeyRound, LogOut, ScanLine } from "lucide-react";
+import { Camera, KeyRound, LogOut, MapPin, ScanLine } from "lucide-react";
 
 import { authApi } from "@/lib/api";
 import type { CurrentUser } from "@/lib/types";
@@ -40,6 +40,13 @@ export function Header({ user }: { user: CurrentUser | null }) {
             >
               <Camera className="mr-1 h-3.5 w-3.5" />
               スキャン
+            </Link>
+            <Link
+              href="/map"
+              className="hidden items-center rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground sm:inline-flex"
+            >
+              <MapPin className="mr-1 h-3.5 w-3.5" />
+              地図
             </Link>
             <Link
               href="/tags"
