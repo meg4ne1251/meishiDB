@@ -41,6 +41,10 @@ CSV_COLUMNS = [
 ]
 
 
+def _like_escape(q: str) -> str:
+    return q.replace("~", "~~").replace("%", "~%").replace("_", "~_")
+
+
 async def _resolve_cards(
     db: AsyncSession,
     user: User,
@@ -90,12 +94,12 @@ async def _resolve_cards(
                     return []
                 base = base.where(Card.id.in_(meili_ids))
             else:
-                like = f"%{q}%"
+                like = f"%{_like_escape(q)}%"
                 base = base.join(CardField, CardField.card_id == Card.id, isouter=True).where(
                     or_(
-                        CardField.person_name.ilike(like),
-                        CardField.company.ilike(like),
-                        CardField.email.ilike(like),
+                        CardField.person_name.ilike(like, escape="~"),
+                        CardField.company.ilike(like, escape="~"),
+                        CardField.email.ilike(like, escape="~"),
                     )
                 )
 

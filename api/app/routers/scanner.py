@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.logging import log
-from app.models.card import Card, CardField
+from app.models.card import Card, CardField, OCR_FIELD_NAMES
 from app.models.user import User
 from app.schemas.card import CardDetail, CardFieldsRead
 from app.services import audit, ocr_client, search_index, storage
@@ -59,7 +59,8 @@ async def import_scanned(
             str(card.id), "front", content, image.content_type
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"storage upload failed: {e}")
+        log.exception("storage.upload_failed", card_id=str(card.id))
+        raise HTTPException(status_code=500, detail="storage upload failed")
 
     card.image_front_key = original_key
     await audit.record(
@@ -79,7 +80,7 @@ async def import_scanned(
         result = await ocr_client.call_ocr(content)
         fields = result.get("fields") or {}
         for k, v in fields.items():
-            if v and not getattr(field, k, None):
+            if k in OCR_FIELD_NAMES and v and not getattr(field, k, None):
                 setattr(field, k, v)
         field.raw_ocr_text = result.get("raw_text") or ""
         field.ocr_confidence = result.get("confidence") or {}
@@ -90,6 +91,9 @@ async def import_scanned(
         log.warning("scanner.ocr_failed", card_id=str(card.id), error=str(e))
         card.status = "uploaded"
         await db.commit()
+
+    # 直前の db.refresh(card) で field が expire され得るので、シリアライズ前に読み直す。
+    await db.refresh(field)
 
     await search_index.upsert_card(card, field)
 

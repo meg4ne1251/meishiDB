@@ -10,6 +10,13 @@ from app.core.db import Base
 CARD_STATUSES = ("uploaded", "ocr_running", "ocr_done", "confirmed", "archived")
 CARD_SOURCES = ("upload", "camera", "scanner", "manual", "email")
 
+# OCR サービスが書き込めるフィールド名のホワイトリスト。
+# card_id / 座標 / 内部フィールドへの意図しない上書きを防ぐ。
+OCR_FIELD_NAMES: frozenset[str] = frozenset({
+    "person_name", "person_name_kana", "company", "department", "title",
+    "postal_code", "address", "phone", "mobile", "fax", "email", "website",
+})
+
 
 class Card(Base):
     __tablename__ = "cards"
@@ -35,9 +42,13 @@ class Card(Base):
     image_front_key: Mapped[str | None] = mapped_column(String)
     image_back_key: Mapped[str | None] = mapped_column(String)
 
-    scanned_at: Mapped[datetime | None]
-    created_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
+    scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
 
     fields: Mapped["CardField"] = relationship(
         back_populates="card", uselist=False, cascade="all, delete-orphan"
@@ -111,7 +122,9 @@ class CardMemo(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
 
     card: Mapped[Card] = relationship(back_populates="memos")
 
@@ -125,7 +138,9 @@ class Favorite(Base):
     card_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True
     )
-    created_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
 
 
 class CardShare(Base):
@@ -147,6 +162,8 @@ class CardShare(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     permission: Mapped[str] = mapped_column(String, nullable=False, server_default="view")
-    created_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
 
     card: Mapped[Card] = relationship(back_populates="shares")

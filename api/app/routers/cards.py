@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
@@ -22,7 +23,7 @@ from sqlalchemy.orm import selectinload
 from app.core.db import SessionLocal, get_db
 from app.core.logging import log
 from app.deps import get_current_user
-from app.models.card import Card, CardField, CardShare, CardTag, Favorite
+from app.models.card import Card, CardField, CardShare, CardTag, Favorite, OCR_FIELD_NAMES
 from app.models.tag import Tag
 from app.models.user import User
 from app.schemas.card import (
@@ -41,6 +42,14 @@ from app.schemas.card import (
 from app.services import audit, geocoder, ocr_client, search_index, storage
 
 router = APIRouter(prefix="/cards", tags=["cards"])
+
+# 同時 OCR 呼び出し数の上限。OCR サービスが遅延したとき Worker を枯渇させないため。
+_OCR_SEMAPHORE = asyncio.Semaphore(5)
+
+
+def _like_escape(q: str) -> str:
+    return q.replace("~", "~~").replace("%", "~%").replace("_", "~_")
+
 
 # 地図に一度に返すマーカー数の上限。これを超える規模ではクラスタリング等が必要だが、
 # まずは描画が破綻しないよう新しい順に上限件数で打ち切る。
@@ -202,18 +211,18 @@ async def list_cards(
                 return CardListResponse(items=[], total=0)
             base = base.where(Card.id.in_(meili_ids))
         else:
-            like = f"%{q}%"
+            like = f"%{_like_escape(q)}%"
             base = base.join(CardField, CardField.card_id == Card.id, isouter=True).where(
                 or_(
-                    CardField.person_name.ilike(like),
-                    CardField.person_name_kana.ilike(like),
-                    CardField.company.ilike(like),
-                    CardField.department.ilike(like),
-                    CardField.title.ilike(like),
-                    CardField.email.ilike(like),
-                    CardField.phone.ilike(like),
-                    CardField.mobile.ilike(like),
-                    CardField.address.ilike(like),
+                    CardField.person_name.ilike(like, escape="~"),
+                    CardField.person_name_kana.ilike(like, escape="~"),
+                    CardField.company.ilike(like, escape="~"),
+                    CardField.department.ilike(like, escape="~"),
+                    CardField.title.ilike(like, escape="~"),
+                    CardField.email.ilike(like, escape="~"),
+                    CardField.phone.ilike(like, escape="~"),
+                    CardField.mobile.ilike(like, escape="~"),
+                    CardField.address.ilike(like, escape="~"),
                 )
             )
 
@@ -459,8 +468,8 @@ async def upload_card_image(
             str(card.id), side, content, image.content_type
         )
     except Exception as e:
-        log.exception("storage.upload_failed")
-        raise HTTPException(status_code=500, detail=f"storage upload failed: {e}")
+        log.exception("storage.upload_failed", card_id=str(card_id))
+        raise HTTPException(status_code=500, detail="storage upload failed")
 
     if side == "front":
         card.image_front_key = original_key
@@ -483,7 +492,8 @@ async def upload_card_image(
 
     if side == "front" and run_ocr:
         try:
-            result = await ocr_client.call_ocr(content)
+            async with _OCR_SEMAPHORE:
+                result = await ocr_client.call_ocr(content)
         except Exception as e:
             log.warning("ocr.failed", card_id=str(card.id), error=str(e))
             card.status = "uploaded"
@@ -543,10 +553,11 @@ async def rerun_ocr(
 
     try:
         data, _ = storage.get_card_image(card.image_front_key)
-        result = await ocr_client.call_ocr(data)
+        async with _OCR_SEMAPHORE:
+            result = await ocr_client.call_ocr(data)
     except Exception as e:
         log.warning("ocr.rerun_failed", card_id=str(card.id), error=str(e))
-        raise HTTPException(status_code=502, detail=f"ocr failed: {e}")
+        raise HTTPException(status_code=502, detail="ocr failed")
 
     await _apply_ocr_result(db, card, result)
     await audit.record(
@@ -614,7 +625,7 @@ async def _apply_ocr_result(db: AsyncSession, card: Card, result: dict) -> None:
         db.add(card.fields)
 
     for k, v in fields.items():
-        if v and not getattr(card.fields, k, None):
+        if k in OCR_FIELD_NAMES and v and not getattr(card.fields, k, None):
             setattr(card.fields, k, v)
 
     card.fields.raw_ocr_text = raw_text
@@ -712,9 +723,14 @@ async def create_share(
         target_id=card_id,
         metadata={"shared_with": str(target.id), "permission": payload.permission},
     )
-    await db.commit()
+    await db.flush()
     await db.refresh(share)
-    await _sync_shares_to_search(db, card_id)
+    try:
+        await _sync_shares_to_search(db, card_id)
+    except Exception as e:
+        log.warning("search.sync_failed", card_id=str(card_id), error=str(e))
+        raise HTTPException(status_code=503, detail="search index sync failed, please retry")
+    await db.commit()
     return ShareInfo.model_validate(share)
 
 
@@ -732,8 +748,13 @@ async def delete_share(
     if card is None or card.owner_id != user.id:
         raise HTTPException(status_code=403, detail="only owner can revoke")
     await db.delete(share)
+    await db.flush()
+    try:
+        await _sync_shares_to_search(db, card_id)
+    except Exception as e:
+        log.warning("search.sync_failed", card_id=str(card_id), error=str(e))
+        raise HTTPException(status_code=503, detail="search index sync failed, please retry")
     await db.commit()
-    await _sync_shares_to_search(db, card_id)
 
 
 async def _sync_shares_to_search(db: AsyncSession, card_id: UUID) -> None:

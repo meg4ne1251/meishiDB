@@ -12,7 +12,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 @router.get("/search", response_model=list[UserSummary])
 async def search_users(
-    q: str = Query(min_length=1, max_length=100),
+    q: str = Query(min_length=2, max_length=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[UserSummary]:

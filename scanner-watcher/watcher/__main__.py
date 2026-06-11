@@ -81,8 +81,13 @@ def _content_type_for(path: Path) -> str:
 def _move(path: Path, target_dir: str | None) -> None:
     if not target_dir:
         return
-    Path(target_dir).mkdir(parents=True, exist_ok=True)
-    shutil.move(str(path), str(Path(target_dir) / path.name))
+    dest_dir = Path(target_dir).absolute()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    # シンボリックリンク経由で意図外のディレクトリへ移動されるのを防ぐ。
+    if dest_dir.resolve() != dest_dir:
+        log.error("_move: symlink detected in target_dir %s, skipping", target_dir)
+        return
+    shutil.move(str(path), str(dest_dir / path.name))
 
 
 def _send(path: Path, *, api_url: str, token: str) -> bool:

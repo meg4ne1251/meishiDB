@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -47,6 +47,9 @@ async def register(
     if existing is not None:
         raise HTTPException(status_code=400, detail="email already registered")
 
+    # 初回 admin 競合を防ぐためアドバイザリロックでシリアライズする。
+    # ロックはトランザクション終了時に自動解放される。
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('register_first_user'))"))
     user_count = await db.scalar(select(User.id).limit(1))
     role = "member" if user_count is not None else "admin"
 

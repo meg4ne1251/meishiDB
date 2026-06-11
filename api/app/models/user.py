@@ -1,7 +1,16 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ARRAY, BigInteger, CheckConstraint, ForeignKey, LargeBinary, String, text
+from sqlalchemy import (
+    ARRAY,
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    LargeBinary,
+    String,
+    text,
+)
 from sqlalchemy.dialects.postgresql import CITEXT, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,9 +29,13 @@ class User(Base):
     role: Mapped[str] = mapped_column(String, nullable=False, server_default="member")
     password_hash: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
-    last_login_at: Mapped[datetime | None]
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     credentials: Mapped[list["WebauthnCredential"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
@@ -44,7 +57,9 @@ class WebauthnCredential(Base):
     transports: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     nickname: Mapped[str | None]
 
-    created_at: Mapped[datetime] = mapped_column(server_default=text("now()"), nullable=False)
-    last_used_at: Mapped[datetime | None]
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user: Mapped[User] = relationship(back_populates="credentials")

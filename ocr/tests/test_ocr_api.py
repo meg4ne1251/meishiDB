@@ -1,0 +1,65 @@
+"""/ocr エンドポイント。PaddleOCR 呼び出し（run_ocr）はスタブ化し、
+抽出ロジック＋レスポンス整形を検証する。"""
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+import app.main as ocr_main
+from app.pipeline import OcrLine
+
+
+@pytest.fixture
+async def client():
+    transport = ASGITransport(app=ocr_main.app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+async def test_healthz(client):
+    r = await client.get("/healthz")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok"}
+
+
+async def test_ocr_rejects_non_image(client):
+    r = await client.post(
+        "/ocr", files={"image": ("note.txt", b"hello", "text/plain")}
+    )
+    assert r.status_code == 400
+    assert "not an image" in r.json()["detail"]
+
+
+async def test_ocr_rejects_empty_file(client):
+    r = await client.post("/ocr", files={"image": ("c.jpg", b"", "image/jpeg")})
+    assert r.status_code == 400
+    assert "empty" in r.json()["detail"]
+
+
+async def test_ocr_success(client, monkeypatch):
+    def fake_run_ocr(image_bytes):
+        return [
+            OcrLine("山田太郎", 0.95, [[0, 0], [100, 0], [100, 30], [0, 30]], 30),
+            OcrLine("株式会社テスト", 0.9, [[0, 40], [100, 40], [100, 60], [0, 60]], 20),
+            OcrLine("taro@example.com", 0.88, [[0, 70], [100, 70], [100, 85], [0, 85]], 15),
+        ]
+
+    monkeypatch.setattr(ocr_main, "run_ocr", fake_run_ocr)
+
+    r = await client.post("/ocr", files={"image": ("c.jpg", b"imagebytes", "image/jpeg")})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["fields"]["person_name"] == "山田太郎"
+    assert body["fields"]["company"] == "株式会社テスト"
+    assert body["fields"]["email"] == "taro@example.com"
+    assert "山田太郎" in body["raw_text"]
+    assert len(body["lines"]) == 3
+
+
+async def test_ocr_handles_run_ocr_failure(client, monkeypatch):
+    def boom(image_bytes):
+        raise RuntimeError("paddle exploded")
+
+    monkeypatch.setattr(ocr_main, "run_ocr", boom)
+    r = await client.post("/ocr", files={"image": ("c.jpg", b"x", "image/jpeg")})
+    assert r.status_code == 500
+    assert "ocr failed" in r.json()["detail"]

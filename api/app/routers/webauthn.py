@@ -59,6 +59,7 @@ def _save_challenge(challenge: bytes, user_id: str | None) -> str:
 
 
 def _pop_challenge(cid: str) -> tuple[bytes, str | None]:
+    _gc_challenges()
     entry = _CHALLENGES.pop(cid, None)
     if entry is None:
         raise HTTPException(status_code=400, detail="challenge expired or missing")
