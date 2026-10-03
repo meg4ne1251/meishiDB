@@ -1,7 +1,13 @@
 """/ocr エンドポイント。PaddleOCR 呼び出し（run_ocr）はスタブ化し、
 抽出ロジック＋レスポンス整形を検証する。"""
 
+import io
+from PIL import Image
 import pytest
+
+_buffer = io.BytesIO()
+Image.new("RGB", (20, 20)).save(_buffer, format="JPEG")
+IMAGE_BYTES = _buffer.getvalue()
 from httpx import ASGITransport, AsyncClient
 
 import app.main as ocr_main
@@ -45,7 +51,7 @@ async def test_ocr_success(client, monkeypatch):
 
     monkeypatch.setattr(ocr_main, "run_ocr", fake_run_ocr)
 
-    r = await client.post("/ocr", files={"image": ("c.jpg", b"imagebytes", "image/jpeg")})
+    r = await client.post("/ocr", files={"image": ("c.jpg", IMAGE_BYTES, "image/jpeg")})
     assert r.status_code == 200
     body = r.json()
     assert body["fields"]["person_name"] == "山田太郎"
@@ -60,6 +66,48 @@ async def test_ocr_handles_run_ocr_failure(client, monkeypatch):
         raise RuntimeError("paddle exploded")
 
     monkeypatch.setattr(ocr_main, "run_ocr", boom)
-    r = await client.post("/ocr", files={"image": ("c.jpg", b"x", "image/jpeg")})
+    r = await client.post("/ocr", files={"image": ("c.jpg", IMAGE_BYTES, "image/jpeg")})
     assert r.status_code == 500
     assert "ocr failed" in r.json()["detail"]
+
+
+async def test_ocr_rejects_large_upload(client):
+    r = await client.post("/ocr", files={"image": ("c.jpg", b"x" * (15 * 1024 * 1024 + 1), "image/jpeg")})
+    assert r.status_code == 413
+
+
+async def test_ocr_rejects_large_dimensions(client, monkeypatch):
+    monkeypatch.setattr("app.images.MAX_IMAGE_PIXELS", 100)
+    r = await client.post("/ocr", files={"image": ("c.jpg", IMAGE_BYTES, "image/jpeg")})
+    assert r.status_code == 413
+
+
+async def test_health_remains_available_and_model_runs_serially(client, monkeypatch):
+    import asyncio
+    import threading
+    started, release = threading.Event(), threading.Event()
+    calls = []
+    def infer(data):
+        calls.append(data)
+        started.set()
+        assert release.wait(5)
+        return []
+    monkeypatch.setattr(ocr_main, "run_ocr", infer)
+    first = asyncio.create_task(client.post("/ocr", files={"image": ("c.jpg", IMAGE_BYTES, "image/jpeg")}))
+    second = None
+    try:
+        for _ in range(200):
+            if started.is_set():
+                break
+            await asyncio.sleep(.01)
+        assert started.is_set()
+        second = asyncio.create_task(client.post("/ocr", files={"image": ("c.jpg", IMAGE_BYTES, "image/jpeg")}))
+        await asyncio.sleep(.05)
+        assert len(calls) == 1
+        assert (await asyncio.wait_for(client.get("/healthz"), timeout=.5)).status_code == 200
+    finally:
+        release.set()
+        assert (await first).status_code == 200
+        if second:
+            assert (await second).status_code == 200
+    assert len(calls) == 2

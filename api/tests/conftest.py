@@ -31,7 +31,7 @@ _PG_PORT = int(os.environ.get("MEISHI_TEST_PG_PORT", "54330"))
 _PG_USER = "meishi"
 _PG_PASSWORD = "meishi"
 _PG_DB = "meishi_test"
-_CONTAINER = "meishidb_test_pg"
+_CONTAINER = f"meishidb_test_pg_{_PG_PORT}"
 
 DATABASE_URL = (
     f"postgresql+asyncpg://{_PG_USER}:{_PG_PASSWORD}@127.0.0.1:{_PG_PORT}/{_PG_DB}"

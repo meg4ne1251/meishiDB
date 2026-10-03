@@ -4,12 +4,12 @@
 
 | コンポーネント | フレームワーク | テスト数 | 必要なもの |
 |---|---|---|---|
-| `api/` (FastAPI) | pytest + pytest-asyncio | 155 | **Docker**（テスト用 `postgres:16` を自動起動） |
-| `ocr/` | pytest | 23 (+1 skip) | なし（PaddleOCR は不要・モック） |
-| `scanner-watcher/` | pytest | 17 | なし |
-| `web/` (Next.js) | Vitest + jsdom | 21 | Node.js |
+| `api/` (FastAPI) | pytest + pytest-asyncio | 182 | **Docker**（テスト用 `postgres:16` を自動起動） |
+| `ocr/` | pytest | 26 (+1 skip) | なし（PaddleOCR は不要・モック） |
+| `scanner-watcher/` | pytest | 19 | なし |
+| `web/` (Next.js) | Vitest + jsdom | 34 | Node.js |
 
-合計 **216 テスト**（別途 OCR 実モデルのテスト1件は依存未導入時に skip）。
+合計 **261 テスト**（別途 OCR 実モデルのテスト1件は依存未導入時に skip）。
 
 ---
 
@@ -19,7 +19,7 @@
 部分インデックス、`timestamptz`）を多用するため、SQLite ではなく **実 PostgreSQL** に対して
 走らせます。`tests/conftest.py` が次を自動でやります:
 
-1. Docker で `postgres:16` を 1 コンテナ起動（コンテナ名 `meishidb_test_pg`、ホストポート `54330`）
+1. Docker で `postgres:16` を 1 コンテナ起動（コンテナ名 `meishidb_test_pg_<port>`、ホストポート `54330`）
 2. Alembic マイグレーションを `head` まで適用してスキーマを作成
    （`Base.metadata.create_all` ではなくマイグレーションを使う。モデルとマイグレーションの
    `timestamptz` 定義を一致させるため）
@@ -92,6 +92,8 @@ python3 -m venv .venv
 `lib/utils.ts`（`cn`）と `lib/api.ts`（fetch ラッパ・`ApiError`・クエリ文字列生成）を
 Vitest でテストします。`fetch` はモック。
 `components/card-memos` は React DOM で表示・追加失敗時の入力保持・再試行・編集・削除確認・閲覧権限・本文の安全な表示も検証します。
+`app/review-fixes.test.tsx`では認証キャッシュ分離、OCR後のフォーム更新、編集中の項目とタグの保護、変更項目だけの送信、一覧のページ送り、トップのリダイレクトを検証します。
+`tests/sw.test.ts`はService Workerの実ファイルをVMで実行し、認証データの除外、静的ファイルのキャッシュ、旧キャッシュの削除を検証します。
 
 ```bash
 cd web

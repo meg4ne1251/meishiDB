@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Camera, KeyRound, LogOut, MapPin, ScanLine } from "lucide-react";
 
 import { authApi } from "@/lib/api";
@@ -10,12 +11,22 @@ import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 export function Header({ user }: { user: CurrentUser | null }) {
-  const router = useRouter();
+  const client = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   async function logout() {
-    await authApi.logout().catch(() => undefined);
-    router.replace("/login");
-    router.refresh();
+    setBusy(true);
+    setError(null);
+    try {
+      await authApi.logout();
+      await client.cancelQueries();
+      client.clear();
+      window.location.replace("/login");
+    } catch {
+      setError("ログアウトに失敗しました。もう一度お試しください。");
+      setBusy(false);
+    }
   }
 
   return (
@@ -65,7 +76,8 @@ export function Header({ user }: { user: CurrentUser | null }) {
               {user.display_name}
             </span>
             <ThemeToggle />
-            <Button size="icon" variant="ghost" onClick={logout} aria-label="logout">
+            {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
+            <Button size="icon" variant="ghost" onClick={logout} disabled={busy} aria-label="logout">
               <LogOut className="h-4 w-4" />
             </Button>
           </nav>

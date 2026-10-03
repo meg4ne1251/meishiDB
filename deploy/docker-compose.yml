@@ -64,10 +64,10 @@ services:
     build:
       context: ../api
     environment:
-      APP_ENV: development
+      APP_ENV: ${APP_ENV:-development}
       SECRET_KEY: ${SECRET_KEY:-dev-only-insecure-secret-please-change}
       DATABASE_URL: postgresql+asyncpg://meishi:meishi@db:5432/meishi
-      CORS_ORIGINS: http://localhost:3000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       OCR_SERVICE_URL: http://ocr:8000
       GEOCODER_URL: ${GEOCODER_URL:-}
       MEILISEARCH_URL: http://search:7700
@@ -159,7 +159,7 @@ services:
     ports:
       - "127.0.0.1:8081:8080"
 
-  # 公開ホスト用: `docker compose --profile proxy up` で起動
+  # 公開ホスト用: production.yml を重ねて `--profile proxy up` で起動
   proxy:
     profiles: ["proxy"]
     image: caddy:2

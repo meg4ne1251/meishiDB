@@ -47,7 +47,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="ja" suppressHydrationWarning>
       <body className="min-h-dvh font-sans antialiased">
-        <Providers>
+        <Providers userId={user?.id ?? null}>
           <Header user={user} />
           <main className="container py-8">{children}</main>
           <ServiceWorkerRegister />

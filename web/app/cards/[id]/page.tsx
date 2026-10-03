@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Heart, MapPin, RefreshCw, Share2, Trash2 } from "lucide-react";
+
+import type { Card as CardData } from "@/lib/types";
 
 import { cardsApi, tagsApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -59,6 +61,10 @@ const FIELDS: Array<{ name: keyof FormValues; label: string; col?: 1 | 2 }> = [
   { name: "address", label: "住所", col: 2 },
 ];
 
+function valuesForCard(card: CardData): FormValues {
+  return Object.fromEntries(FIELDS.map(({ name }) => [name, card.fields?.[name] ?? ""]));
+}
+
 export default function CardDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -79,33 +85,32 @@ export default function CardDetailPage() {
   const form = useForm<FormValues>({ resolver: zodResolver(schema) });
   const [tagSelection, setTagSelection] = useState<Set<string>>(new Set());
 
+  const [tagsDirty, setTagsDirty] = useState(false);
+  const formCardId = useRef<string | null>(null);
+  const { dirtyFields } = form.formState;
+  const { reset } = form;
+
   useEffect(() => {
     if (!card) return;
-    form.reset({
-      person_name: card.fields?.person_name ?? "",
-      person_name_kana: card.fields?.person_name_kana ?? "",
-      company: card.fields?.company ?? "",
-      department: card.fields?.department ?? "",
-      title: card.fields?.title ?? "",
-      postal_code: card.fields?.postal_code ?? "",
-      address: card.fields?.address ?? "",
-      phone: card.fields?.phone ?? "",
-      mobile: card.fields?.mobile ?? "",
-      fax: card.fields?.fax ?? "",
-      email: card.fields?.email ?? "",
-      website: card.fields?.website ?? "",
-    });
-    setTagSelection(new Set(card.tags.map((t) => t.id)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card?.id]);
+    const sameCard = formCardId.current === card.id;
+    reset(valuesForCard(card), { keepDirtyValues: sameCard });
+    if (!sameCard || !tagsDirty) setTagSelection(new Set(card.tags.map((t) => t.id)));
+    if (!sameCard) setTagsDirty(false);
+    formCardId.current = card.id;
+  }, [card, reset, tagsDirty]);
 
   const updateMutation = useMutation({
     mutationFn: (values: FormValues) =>
       cardsApi.update(cardId, {
-        fields: values,
-        tag_ids: card?.shared ? undefined : Array.from(tagSelection),
+        fields: Object.fromEntries(
+          Object.entries(values).filter(([name]) => dirtyFields[name as keyof FormValues]),
+        ),
+        tag_ids: card?.shared || !tagsDirty ? undefined : Array.from(tagSelection),
       }),
-    onSuccess: () => {
+    onSuccess: (saved) => {
+      reset(valuesForCard(saved));
+      setTagsDirty(false);
+      qc.setQueryData(["card", cardId], saved);
       qc.invalidateQueries({ queryKey: ["card", cardId] });
       qc.invalidateQueries({ queryKey: ["cards"] });
     },
@@ -127,7 +132,10 @@ export default function CardDetailPage() {
   const uploadFront = useMutation({
     mutationFn: (file: File) =>
       cardsApi.uploadImage(cardId, file, { side: "front", runOcr: true, filename: file.name }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["card", cardId] }),
+    onSuccess: (saved) => {
+      qc.setQueryData(["card", cardId], saved);
+      qc.invalidateQueries({ queryKey: ["cards"] });
+    },
   });
   const uploadBack = useMutation({
     mutationFn: (file: File) =>
@@ -136,7 +144,10 @@ export default function CardDetailPage() {
   });
   const rerunOcr = useMutation({
     mutationFn: () => cardsApi.rerunOcr(cardId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["card", cardId] }),
+    onSuccess: (saved) => {
+      qc.setQueryData(["card", cardId], saved);
+      qc.invalidateQueries({ queryKey: ["cards"] });
+    },
   });
   const geocode = useMutation({
     mutationFn: () => cardsApi.geocode(cardId),
@@ -145,6 +156,8 @@ export default function CardDetailPage() {
       qc.invalidateQueries({ queryKey: ["cards", "geo"] });
     },
   });
+
+  const imageBusy = updateMutation.isPending || uploadFront.isPending || uploadBack.isPending || rerunOcr.isPending;
 
   if (isLoading) return <p className="text-sm text-muted-foreground">読み込み中...</p>;
   if (!card) return <p className="text-sm">名刺が見つかりません</p>;
@@ -220,7 +233,7 @@ export default function CardDetailPage() {
                 )}
                 <CardImageCapture
                   label="表面を撮影"
-                  disabled={uploadFront.isPending}
+                  disabled={imageBusy}
                   onPicked={(f) => uploadFront.mutate(f)}
                 />
               </div>
@@ -245,7 +258,7 @@ export default function CardDetailPage() {
                 )}
                 <CardImageCapture
                   label="裏面を撮影"
-                  disabled={uploadBack.isPending}
+                  disabled={imageBusy}
                   onPicked={(f) => uploadBack.mutate(f)}
                 />
               </div>
@@ -263,7 +276,7 @@ export default function CardDetailPage() {
                   size="sm"
                   variant="outline"
                   onClick={() => rerunOcr.mutate()}
-                  disabled={rerunOcr.isPending}
+                  disabled={imageBusy}
                 >
                   <RefreshCw className="mr-1 h-3.5 w-3.5" />
                   OCR を再実行
@@ -275,7 +288,9 @@ export default function CardDetailPage() {
       )}
 
       <form
-        onSubmit={form.handleSubmit((v) => updateMutation.mutate(v))}
+        onSubmit={form.handleSubmit((values) => {
+          if (!imageBusy) updateMutation.mutate(values);
+        })}
         className="flex flex-col gap-6"
       >
         <Card>
@@ -290,7 +305,7 @@ export default function CardDetailPage() {
                   className={`flex flex-col gap-1.5 ${f.col === 2 ? "sm:col-span-2" : ""}`}
                 >
                   <Label htmlFor={f.name}>{f.label}</Label>
-                  <Input id={f.name} {...form.register(f.name)} />
+                  <Input id={f.name} disabled={updateMutation.isPending} {...form.register(f.name)} />
                 </div>
               ))}
             </div>
@@ -364,14 +379,16 @@ export default function CardDetailPage() {
                       type="button"
                       size="sm"
                       variant={on ? "default" : "outline"}
-                      onClick={() =>
+                      disabled={updateMutation.isPending}
+                      onClick={() => {
+                        setTagsDirty(true);
                         setTagSelection((prev) => {
                           const next = new Set(prev);
                           if (on) next.delete(t.id);
                           else next.add(t.id);
                           return next;
-                        })
-                      }
+                        });
+                      }}
                     >
                       {t.name}
                     </Button>
@@ -416,7 +433,7 @@ export default function CardDetailPage() {
         )}
 
         <div className="flex justify-end gap-2">
-          <Button type="submit" disabled={updateMutation.isPending}>
+          <Button type="submit" disabled={imageBusy}>
             {updateMutation.isPending ? "保存中..." : "保存"}
           </Button>
         </div>

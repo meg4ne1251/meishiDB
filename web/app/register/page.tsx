@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -29,7 +28,6 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 export default function RegisterPage() {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
 
   const {
@@ -42,8 +40,7 @@ export default function RegisterPage() {
     setError(null);
     try {
       await authApi.register(values.email, values.display_name, values.password);
-      router.replace("/cards");
-      router.refresh();
+      window.location.replace("/cards");
     } catch (e) {
       if (e instanceof ApiError) {
         setError(typeof e.detail === "string" ? e.detail : "登録できませんでした");

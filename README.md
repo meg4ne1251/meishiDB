@@ -72,7 +72,7 @@ docker compose up --build
 ### 公開ホスト用 Caddy
 
 ```bash
-PUBLIC_HOST=meishi.example.com docker compose --profile proxy up -d
+PUBLIC_HOST=meishi.example.com docker compose -f docker-compose.yml -f production.yml --profile proxy up -d --build
 ```
 
 VPN 内ホスト名であれば Caddyfile の該当ホスト指定を `tls internal` 付きに変更。
@@ -128,7 +128,8 @@ meishiDB/
 ## セキュリティ運用ノート
 
 - `SECRET_KEY` / `MEILI_MASTER_KEY` / `MINIO_ROOT_PASSWORD` は十分に長いランダム文字列に置き換える
-- 本番では `APP_ENV=production` にして Secure Cookie を強制
+- 本番では `production.yml` を重ねる（`!reset`に対応したDocker Composeが必要）。Secure Cookie、API の再読込なし起動、Web の本番ビルドを適用する。`--profile proxy` だけでは開発モードのまま。
+- 初回の管理者登録は外部アクセスを制限した状態で済ませてから公開する。公開登録とパスキーの本人確認ポリシーは導入先で決定する。
 - WebAuthn は `WEBAUTHN_RP_ID` を本番ドメイン (例: `meishi.example.com`) に、`WEBAUTHN_ORIGIN` を `https://...` に設定
 - 公開 URL に出すなら Caddy + 自動 TLS（`deploy/Caddyfile`）
 - 監査ログ（`audit_logs` テーブル）は append-only。MVP では削除エンドポイント無し
@@ -154,3 +155,10 @@ meishiDB/
 - [ ] CSV / vCard ボタンからダウンロードできる
 - [ ] 共有ダイアログから別ユーザーに view/edit 権限を付与できる
 - [ ] スキャナフォルダに画像を置くと `scanner-watcher` が POST して名刺が自動作成される
+
+CSVはExcel等の表計算ソフトでの閲覧向けです。数式の開始文字を含む値には先頭に
+アポストロフィを追加します。このCSVを再インポートする場合は値が元データと異なることが
+あります。連絡先の移行にはvCardを利用してください。
+
+画像アップロードとOCRは15 MiB、25百万画素、最長辺10,000 pxが上限です。
+API・OCRの受信ボディはmultipart分を含め16 MiBまでです。

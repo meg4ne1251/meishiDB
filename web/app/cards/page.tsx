@@ -30,15 +30,23 @@ export default function CardsPage() {
   const [tagId, setTagId] = useState<string | null>(params.get("tag") || null);
   const [query, setQuery] = useState(params.get("q") ?? "");
   const debouncedQ = useDebounced(query);
+  const pageSize = 50;
+  const filterKey = JSON.stringify([scope, debouncedQ, favorite, tagId]);
+  const [pagination, setPagination] = useState({ filterKey, offset: 0 });
+  const offset = pagination.filterKey === filterKey ? pagination.offset : 0;
+  useEffect(() => { setPagination({ filterKey, offset: 0 }); }, [filterKey]);
+
 
   const queryParams: ListCardsParams = useMemo(
     () => ({
       scope,
+      limit: pageSize,
+      offset,
       q: debouncedQ || undefined,
       favorite: favorite || undefined,
       tag_id: tagId || undefined,
     }),
-    [scope, debouncedQ, favorite, tagId],
+    [scope, debouncedQ, favorite, tagId, offset],
   );
 
   const { data, isLoading } = useQuery({
@@ -203,6 +211,19 @@ export default function CardsPage() {
             );
           })}
         </div>
+      )}
+      {data && data.total > pageSize && (
+        <nav aria-label="ページ送り" className="flex items-center justify-center gap-4">
+          <Button variant="outline" disabled={offset === 0 || isLoading}
+            onClick={() => setPagination({ filterKey, offset: Math.max(0, offset - pageSize) })}>
+            前へ
+          </Button>
+          <span className="text-sm">{Math.floor(offset / pageSize) + 1} / {Math.ceil(data.total / pageSize)}</span>
+          <Button variant="outline" disabled={offset + pageSize >= data.total || isLoading}
+            onClick={() => setPagination({ filterKey, offset: offset + pageSize })}>
+            次へ
+          </Button>
+        </nav>
       )}
     </div>
   );

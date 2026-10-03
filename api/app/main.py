@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from starlette.concurrency import run_in_threadpool
+from app.core.body_limit import BodyLimitMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
@@ -14,7 +16,7 @@ async def lifespan(app: FastAPI):
     configure_logging()
     log.info("api.startup", env=get_settings().app_env)
     try:
-        storage.ensure_buckets()
+        await run_in_threadpool(storage.ensure_buckets)
     except Exception as e:
         log.warning("storage.bootstrap_failed", error=str(e))
     yield
@@ -24,6 +26,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="meishiDB API", version="0.1.0", lifespan=lifespan)
 
+    app.add_middleware(BodyLimitMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,

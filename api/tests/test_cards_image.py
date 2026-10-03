@@ -16,6 +16,7 @@ async def _create_card(client, **fields):
 
 @pytest.fixture
 def storage_stub(monkeypatch):
+    monkeypatch.setattr("app.services.images.validate_image", lambda content: None)
     """MinIO を「設定済み」に見せて、保存・取得をメモリ上で完結させる。"""
     store: dict[str, bytes] = {}
 

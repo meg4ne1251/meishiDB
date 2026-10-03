@@ -17,6 +17,7 @@ def scanner_config(monkeypatch):
 
 @pytest.fixture
 def storage_stub(monkeypatch):
+    monkeypatch.setattr("app.services.images.validate_image", lambda content: None)
     def upload(card_id, side, content, content_type):
         return f"{card_id}/{side}.jpg", f"{card_id}/{side}_512.webp"
 

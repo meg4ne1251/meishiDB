@@ -20,7 +20,8 @@ from app.core.db import get_db
 from app.deps import get_current_user
 from app.models.card import Card, CardField, CardShare, CardTag, Favorite
 from app.models.user import User
-from app.services import audit, search_index
+from app.services import audit
+from app.services.card_query import apply_search
 
 router = APIRouter(prefix="/export", tags=["export"])
 
@@ -39,10 +40,6 @@ CSV_COLUMNS = [
     "address",
     "website",
 ]
-
-
-def _like_escape(q: str) -> str:
-    return q.replace("~", "~~").replace("%", "~%").replace("_", "~_")
 
 
 async def _resolve_cards(
@@ -88,20 +85,7 @@ async def _resolve_cards(
             base = base.where(Card.id.in_(tag_card_ids))
 
         if q:
-            meili_ids = await search_index.search_card_ids(user.id, q)
-            if meili_ids is not None:
-                if not meili_ids:
-                    return []
-                base = base.where(Card.id.in_(meili_ids))
-            else:
-                like = f"%{_like_escape(q)}%"
-                base = base.join(CardField, CardField.card_id == Card.id, isouter=True).where(
-                    or_(
-                        CardField.person_name.ilike(like, escape="~"),
-                        CardField.company.ilike(like, escape="~"),
-                        CardField.email.ilike(like, escape="~"),
-                    )
-                )
+            base = await apply_search(base, user.id, q)
 
     rows = list(await db.scalars(base))
 
@@ -117,13 +101,20 @@ async def _resolve_cards(
     return rows
 
 
+def _spreadsheet_cell(value: str) -> str:
+    # Quoting CSV does not stop formulas. Prefix dangerous text for spreadsheet use.
+    if value.startswith(("\t", "\r", "\n")) or value.lstrip().startswith(("=", "+", "-", "@", "＝", "＋", "－", "＠")):
+        return "'" + value
+    return value
+
+
 def _csv_bytes(cards: list[Card]) -> bytes:
     buf = io.StringIO()
     writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL)
     writer.writerow(CSV_COLUMNS)
     for c in cards:
         f = c.fields
-        writer.writerow([getattr(f, col, "") or "" if f else "" for col in CSV_COLUMNS])
+        writer.writerow([_spreadsheet_cell((getattr(f, col, "") or "") if f else "") for col in CSV_COLUMNS])
     # Excel での文字化け回避に BOM を付ける
     return ("﻿" + buf.getvalue()).encode("utf-8")
 

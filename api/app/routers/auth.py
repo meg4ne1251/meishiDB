@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,7 +57,7 @@ async def register(
     user = User(
         email=payload.email,
         display_name=payload.display_name,
-        password_hash=hash_password(payload.password),
+        password_hash=await run_in_threadpool(hash_password, payload.password),
         role=role,
     )
     db.add(user)
@@ -100,7 +101,11 @@ async def login(
 ) -> CurrentUser:
     settings = get_settings()
     user = await db.scalar(select(User).where(User.email == payload.email))
-    if user is None or not user.password_hash or not verify_password(payload.password, user.password_hash):
+    if (
+        user is None
+        or not user.password_hash
+        or not await run_in_threadpool(verify_password, payload.password, user.password_hash)
+    ):
         await audit.record(
             db,
             user_id=user.id if user else None,

@@ -1,0 +1,21 @@
+# docker compose -f docker-compose.yml -f production.yml --profile proxy up -d --build
+services:
+  api:
+    environment:
+      APP_ENV: production
+      SECRET_KEY: ${SECRET_KEY:?Set a strong SECRET_KEY}
+      CORS_ORIGINS: https://${PUBLIC_HOST:?Set PUBLIC_HOST}
+      WEBAUTHN_RP_ID: ${PUBLIC_HOST:?Set PUBLIC_HOST}
+      WEBAUTHN_ORIGIN: https://${PUBLIC_HOST:?Set PUBLIC_HOST}
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --limit-concurrency 32 --timeout-keep-alive 5"
+    volumes: !reset []
+  web:
+    build:
+      target: prod
+      args:
+        NEXT_PUBLIC_API_URL: http://api:8000
+        NEXT_PUBLIC_MAP_TILE_URL: ${NEXT_PUBLIC_MAP_TILE_URL:-}
+    environment:
+      NODE_ENV: production
+    volumes: !reset []

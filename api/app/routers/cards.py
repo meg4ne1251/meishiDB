@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
@@ -16,7 +15,8 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy import delete, func, or_, select
+from starlette.concurrency import run_in_threadpool
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -43,16 +43,10 @@ from app.schemas.card import (
     TagSummary,
 )
 from app.services import audit, geocoder, ocr_client, search_index, storage
+from app.services.card_query import apply_search
+from app.services.images import MAX_IMAGE_BYTES, read_image
 
 router = APIRouter(prefix="/cards", tags=["cards"])
-
-# 同時 OCR 呼び出し数の上限。OCR サービスが遅延したとき Worker を枯渇させないため。
-_OCR_SEMAPHORE = asyncio.Semaphore(5)
-
-
-def _like_escape(q: str) -> str:
-    return q.replace("~", "~~").replace("%", "~%").replace("_", "~_")
-
 
 # 地図に一度に返すマーカー数の上限。これを超える規模ではクラスタリング等が必要だが、
 # まずは描画が破綻しないよう新しい順に上限件数で打ち切る。
@@ -60,8 +54,6 @@ GEO_MAX_POINTS = 5000
 
 
 CARD_STATUSES = {"uploaded", "ocr_running", "ocr_done", "confirmed", "archived"}
-ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
-MAX_IMAGE_BYTES = 15 * 1024 * 1024  # 15 MB
 
 
 async def _resolve_tags(db: AsyncSession, owner_id: UUID, tag_ids: list[UUID]) -> list[Tag]:
@@ -133,8 +125,10 @@ async def _geocode_card_in_background(card_id: UUID) -> None:
         coords = await geocoder.geocode(address)
         if coords is None:
             return
-        card.fields.latitude, card.fields.longitude = coords
-        card.fields.geocoded_at = datetime.now(timezone.utc)
+        await db.execute(
+            update(CardField).where(CardField.card_id == card_id, CardField.address == address)
+            .values(latitude=coords[0], longitude=coords[1], geocoded_at=datetime.now(timezone.utc))
+        )
         await db.commit()
 
 
@@ -182,7 +176,7 @@ async def list_cards(
     base = (
         select(Card)
         .options(selectinload(Card.fields))
-        .order_by(Card.updated_at.desc())
+        .order_by(Card.updated_at.desc(), Card.id.desc())
     )
 
     shared_card_ids = (
@@ -207,27 +201,7 @@ async def list_cards(
         base = base.where(Card.id.in_(tag_card_ids))
 
     if q:
-        # Meilisearch が動いていれば、まず ID 集合に絞り込む
-        meili_ids = await search_index.search_card_ids(user.id, q)
-        if meili_ids is not None:
-            if not meili_ids:
-                return CardListResponse(items=[], total=0)
-            base = base.where(Card.id.in_(meili_ids))
-        else:
-            like = f"%{_like_escape(q)}%"
-            base = base.join(CardField, CardField.card_id == Card.id, isouter=True).where(
-                or_(
-                    CardField.person_name.ilike(like, escape="~"),
-                    CardField.person_name_kana.ilike(like, escape="~"),
-                    CardField.company.ilike(like, escape="~"),
-                    CardField.department.ilike(like, escape="~"),
-                    CardField.title.ilike(like, escape="~"),
-                    CardField.email.ilike(like, escape="~"),
-                    CardField.phone.ilike(like, escape="~"),
-                    CardField.mobile.ilike(like, escape="~"),
-                    CardField.address.ilike(like, escape="~"),
-                )
-            )
+        base = await apply_search(base, user.id, q)
 
     total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
     rows = await db.scalars(base.limit(limit).offset(offset))
@@ -384,6 +358,7 @@ async def update_card(
         for t in tags:
             db.add(CardTag(card_id=card.id, tag_id=t.id))
 
+    card.updated_at = datetime.now(timezone.utc)
     await audit.record(
         db,
         user_id=user.id,
@@ -430,7 +405,7 @@ async def delete_card(
 
     if storage.is_configured():
         try:
-            storage.delete_card_images(str(card_id))
+            await run_in_threadpool(storage.delete_card_images, str(card_id))
         except Exception as e:
             log.warning("storage.delete_failed", card_id=str(card_id), error=str(e))
     await search_index.delete_card(card_id)
@@ -443,6 +418,7 @@ async def delete_card(
 async def upload_card_image(
     card_id: UUID,
     request: Request,
+    background_tasks: BackgroundTasks,
     side: Literal["front", "back"] = Form("front"),
     run_ocr: bool = Form(True),
     image: UploadFile = File(...),
@@ -457,20 +433,14 @@ async def upload_card_image(
     if shared:
         raise HTTPException(status_code=403, detail="only owner can upload images")
 
-    if image.content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(status_code=400, detail="unsupported image type")
-
-    content = await image.read()
-    if len(content) == 0:
-        raise HTTPException(status_code=400, detail="empty image")
-    if len(content) > MAX_IMAGE_BYTES:
-        raise HTTPException(status_code=413, detail="image too large")
+    content = await read_image(image, MAX_IMAGE_BYTES)
 
     try:
-        original_key, _thumb_key = storage.upload_card_image(
+        original_key, _thumb_key = await run_in_threadpool(
+            storage.upload_card_image,
             str(card.id), side, content, image.content_type
         )
-    except Exception as e:
+    except Exception:
         log.exception("storage.upload_failed", card_id=str(card_id))
         raise HTTPException(status_code=500, detail="storage upload failed")
 
@@ -481,6 +451,7 @@ async def upload_card_image(
     else:
         card.image_back_key = original_key
 
+    card.updated_at = datetime.now(timezone.utc)
     await audit.record(
         db,
         user_id=user.id,
@@ -495,14 +466,13 @@ async def upload_card_image(
 
     if side == "front" and run_ocr:
         try:
-            async with _OCR_SEMAPHORE:
-                result = await ocr_client.call_ocr(content)
+            result = await ocr_client.call_ocr_limited(content)
         except Exception as e:
             log.warning("ocr.failed", card_id=str(card.id), error=str(e))
             card.status = "uploaded"
             await db.commit()
         else:
-            await _apply_ocr_result(db, card, result)
+            await _apply_ocr_result(db, card, result, background_tasks)
 
     summary = await _serialize(db, card, viewer_id=user.id)
     await search_index.upsert_card(card, card.fields)
@@ -525,22 +495,23 @@ async def get_card_image(
     if thumb and side == "front":
         thumb_key = key.rsplit(".", 1)[0] + "_512.webp"
         try:
-            data, ct = storage.get_card_image(thumb_key, thumb=True)
+            data, ct = await run_in_threadpool(storage.get_card_image, thumb_key, thumb=True)
         except Exception:
-            data, ct = storage.get_card_image(key)
+            data, ct = await run_in_threadpool(storage.get_card_image, key)
     else:
         try:
-            data, ct = storage.get_card_image(key)
+            data, ct = await run_in_threadpool(storage.get_card_image, key)
         except Exception as e:
             raise HTTPException(status_code=404, detail=f"image not found: {e}")
 
-    return Response(content=data, media_type=ct, headers={"Cache-Control": "private, max-age=300"})
+    return Response(content=data, media_type=ct, headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/{card_id}/ocr", response_model=CardDetail)
 async def rerun_ocr(
     card_id: UUID,
     request: Request,
+    background_tasks: BackgroundTasks,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CardDetail:
@@ -555,14 +526,13 @@ async def rerun_ocr(
         raise HTTPException(status_code=400, detail="no front image uploaded")
 
     try:
-        data, _ = storage.get_card_image(card.image_front_key)
-        async with _OCR_SEMAPHORE:
-            result = await ocr_client.call_ocr(data)
+        data, _ = await run_in_threadpool(storage.get_card_image, card.image_front_key)
+        result = await ocr_client.call_ocr_limited(data)
     except Exception as e:
         log.warning("ocr.rerun_failed", card_id=str(card.id), error=str(e))
         raise HTTPException(status_code=502, detail="ocr failed")
 
-    await _apply_ocr_result(db, card, result)
+    await _apply_ocr_result(db, card, result, background_tasks)
     await audit.record(
         db,
         user_id=user.id,
@@ -599,8 +569,14 @@ async def geocode_card(
     if coords is None:
         raise HTTPException(status_code=404, detail="address could not be geocoded")
 
-    card.fields.latitude, card.fields.longitude = coords
-    card.fields.geocoded_at = datetime.now(timezone.utc)
+    changed = await db.execute(
+        update(CardField).where(CardField.card_id == card_id, CardField.address == address)
+        .values(latitude=coords[0], longitude=coords[1], geocoded_at=datetime.now(timezone.utc))
+        .execution_options(synchronize_session=False)
+    )
+    if changed.rowcount == 0:
+        raise HTTPException(status_code=409, detail="address changed during geocoding")
+    card.updated_at = datetime.now(timezone.utc)
 
     await audit.record(
         db,
@@ -617,7 +593,7 @@ async def geocode_card(
     return CardDetail(**summary.model_dump())
 
 
-async def _apply_ocr_result(db: AsyncSession, card: Card, result: dict) -> None:
+async def _apply_ocr_result(db: AsyncSession, card: Card, result: dict, background_tasks: BackgroundTasks) -> None:
     """OCR の出力（{fields, confidence, raw_text}）を card_fields に適用。"""
     fields = result.get("fields") or {}
     confidence = result.get("confidence") or {}
@@ -627,6 +603,7 @@ async def _apply_ocr_result(db: AsyncSession, card: Card, result: dict) -> None:
         card.fields = CardField(card_id=card.id)
         db.add(card.fields)
 
+    old_address = card.fields.address
     for k, v in fields.items():
         if k in OCR_FIELD_NAMES and v and not getattr(card.fields, k, None):
             setattr(card.fields, k, v)
@@ -634,6 +611,9 @@ async def _apply_ocr_result(db: AsyncSession, card: Card, result: dict) -> None:
     card.fields.raw_ocr_text = raw_text
     card.fields.ocr_confidence = confidence
     card.status = "ocr_done"
+    card.updated_at = datetime.now(timezone.utc)
+    if card.fields.address != old_address:
+        background_tasks.add_task(_geocode_card_in_background, card.id)
     await db.commit()
     await db.refresh(card)
 

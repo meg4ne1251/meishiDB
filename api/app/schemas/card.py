@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -37,7 +37,7 @@ class TagSummary(BaseModel):
 
 
 class CardCreate(BaseModel):
-    source: str = Field(default="manual")
+    source: Literal["upload", "camera", "scanner", "manual", "email"] = "manual"
     fields: CardFieldsBase = Field(default_factory=CardFieldsBase)
     tag_ids: list[UUID] = Field(default_factory=list)
 

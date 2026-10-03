@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -31,7 +30,6 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 export default function LoginPage() {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
 
@@ -46,8 +44,7 @@ export default function LoginPage() {
     setError(null);
     try {
       await authApi.login(values.email, values.password);
-      router.replace("/cards");
-      router.refresh();
+      window.location.replace("/cards");
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         setError("メールアドレスまたはパスワードが違います");
@@ -63,8 +60,7 @@ export default function LoginPage() {
     try {
       const email = watch("email") || undefined;
       await loginWithPasskey(email);
-      router.replace("/cards");
-      router.refresh();
+      window.location.replace("/cards");
     } catch (e) {
       setError(
         e instanceof Error

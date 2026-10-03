@@ -79,7 +79,6 @@ def _doc_for_card(card: Card, fields: CardField | None) -> dict[str, Any]:
     return {
         "id": str(card.id),
         "owner_id": str(card.owner_id),
-        "shared_with": [],  # 共有更新時に shares 経由で再投入する
         "status": card.status,
         "person_name": getattr(f, "person_name", None) if f else None,
         "person_name_kana": getattr(f, "person_name_kana", None) if f else None,
@@ -102,7 +101,7 @@ async def upsert_card(card: Card, fields: CardField | None) -> None:
         client = _get_async_client()
         if client is None:
             return
-        await client.index(_INDEX).add_documents([_doc_for_card(card, fields)])
+        await client.index(_INDEX).update_documents([_doc_for_card(card, fields)])
     except Exception as e:
         logger.warning("meili upsert failed (%s): %s", card.id, e)
 

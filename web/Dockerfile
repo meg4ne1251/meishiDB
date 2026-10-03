@@ -1,7 +1,7 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 
 FROM node:20-alpine AS dev
 WORKDIR /app
@@ -12,6 +12,11 @@ CMD ["npm", "run", "dev"]
 
 FROM node:20-alpine AS build
 WORKDIR /app
+ARG NEXT_PUBLIC_API_URL=http://api:8000
+ARG NEXT_PUBLIC_MAP_TILE_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_MAP_TILE_URL=$NEXT_PUBLIC_MAP_TILE_URL
+ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build

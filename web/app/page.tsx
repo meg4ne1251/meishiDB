@@ -5,13 +5,14 @@ import { authApi } from "@/lib/api";
 
 export default async function HomePage() {
   const cookie = (await headers()).get("cookie") ?? "";
+  let authenticated = false;
   try {
     if (cookie) {
       await authApi.me(cookie);
-      redirect("/cards");
+      authenticated = true;
     }
   } catch {
     // fallthrough → /login
   }
-  redirect("/login");
+  redirect(authenticated ? "/cards" : "/login");
 }

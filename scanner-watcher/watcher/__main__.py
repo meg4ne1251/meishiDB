@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 from queue import Queue, Empty
 from threading import Thread
+from uuid import uuid4
 
 import httpx
 from watchdog.events import FileSystemEventHandler
@@ -87,7 +88,35 @@ def _move(path: Path, target_dir: str | None) -> None:
     if dest_dir.resolve() != dest_dir:
         log.error("_move: symlink detected in target_dir %s, skipping", target_dir)
         return
-    shutil.move(str(path), str(dest_dir / path.name))
+    destination = dest_dir / path.name
+    while True:
+        try:
+            # Reserve the filename atomically, including across processes.
+            fd = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.close(fd)
+            break
+        except FileExistsError:
+            destination = dest_dir / f"{path.stem}-{uuid4().hex}{path.suffix}"
+    try:
+        shutil.move(str(path), str(destination))
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+
+
+def _move_with_retry(path: Path, target_dir: str | None) -> None:
+    for attempt in range(3):
+        try:
+            _move(path, target_dir)
+            return
+        except FileNotFoundError:
+            log.warning("file disappeared before move: %s", path)
+            return
+        except OSError:
+            log.exception("move failed for %s (attempt %s/3)", path, attempt + 1)
+            if attempt < 2:
+                time.sleep(1.0)
+    log.error("file left in place after move failures: %s", path)
 
 
 def _send(path: Path, *, api_url: str, token: str) -> bool:
@@ -118,13 +147,18 @@ def worker(queue: Queue[Path], api_url: str, token: str, processed: str | None, 
         except Empty:
             continue
 
-        if not _wait_until_stable(path):
-            log.warning("file did not stabilize: %s", path)
-            _move(path, failed)
-            continue
-
-        ok = _send(path, api_url=api_url, token=token)
-        _move(path, processed if ok else failed)
+        try:
+            if not _wait_until_stable(path):
+                log.warning("file did not stabilize: %s", path)
+                _move_with_retry(path, failed)
+                continue
+            ok = _send(path, api_url=api_url, token=token)
+            # Retry only the move; never repeat a successful API import here.
+            _move_with_retry(path, processed if ok else failed)
+        except Exception:
+            log.exception("unexpected processing error for %s", path)
+        finally:
+            queue.task_done()
 
 
 def main() -> None:
@@ -153,15 +187,20 @@ def main() -> None:
     observer.schedule(handler, scan_dir, recursive=False)
     observer.start()
 
-    Thread(
+    worker_thread = Thread(
         target=worker,
         args=(queue, api_url, token, processed, failed),
         daemon=True,
-    ).start()
+    )
+    worker_thread.start()
 
     try:
         while True:
-            time.sleep(60)
+            time.sleep(5)
+            if not worker_thread.is_alive():
+                log.error("scanner worker stopped; restarting")
+                worker_thread = Thread(target=worker, args=(queue, api_url, token, processed, failed), daemon=True)
+                worker_thread.start()
     except KeyboardInterrupt:
         observer.stop()
     observer.join()

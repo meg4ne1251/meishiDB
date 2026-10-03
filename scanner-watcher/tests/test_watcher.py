@@ -146,3 +146,47 @@ def test_handler_on_moved_uses_dest_path():
     h = wm.Handler(q)
     h.on_moved(_Event(src_path="/tmp/x.tmp", dest_path="/scans/final.png"))
     assert q.get_nowait() == Path("/scans/final.png")
+
+
+def test_move_preserves_existing_same_name(tmp_path):
+    inbox = tmp_path / "inbox"
+    dest = tmp_path / "processed"
+    inbox.mkdir()
+    dest.mkdir()
+    (dest / "same.jpg").write_bytes(b"old")
+    source = inbox / "same.jpg"
+    source.write_bytes(b"new")
+    wm._move(source, str(dest))
+    assert (dest / "same.jpg").read_bytes() == b"old"
+    assert sorted(p.read_bytes() for p in dest.iterdir()) == [b"new", b"old"]
+    assert not source.exists()
+
+
+def test_worker_continues_after_move_failure(monkeypatch):
+    paths = [Path("first.jpg"), Path("second.jpg")]
+    class TestQueue:
+        completed = 0
+        def get(self, timeout):
+            if not paths:
+                raise StopIteration()
+            return paths.pop(0)
+        def task_done(self):
+            self.completed += 1
+    queue = TestQueue()
+    sent, moved = [], []
+    monkeypatch.setattr(wm, "_wait_until_stable", lambda _: True)
+    monkeypatch.setattr(wm.time, "sleep", lambda _: None)
+    def send(path, **kwargs):
+        sent.append(path.name)
+        return True
+    def move(path, target):
+        moved.append(path.name)
+        if path.name == "first.jpg":
+            raise OSError("disk unavailable")
+    monkeypatch.setattr(wm, "_send", send)
+    monkeypatch.setattr(wm, "_move", move)
+    with pytest.raises(StopIteration):
+        wm.worker(queue, "http://api", "token", "processed", "failed")
+    assert sent == ["first.jpg", "second.jpg"]
+    assert moved == ["first.jpg"] * 3 + ["second.jpg"]
+    assert queue.completed == 2

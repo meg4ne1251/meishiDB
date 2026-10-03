@@ -33,6 +33,7 @@ def get_client():
     if not _is_configured():
         raise RuntimeError("MinIO is not configured")
     from minio import Minio
+    import urllib3
 
     s = get_settings()
     endpoint = s.minio_endpoint
@@ -43,6 +44,11 @@ def get_client():
         access_key=s.minio_access_key,
         secret_key=s.minio_secret_key,
         secure=secure,
+        http_client=urllib3.PoolManager(
+            timeout=urllib3.Timeout(connect=5.0, read=30.0),
+            retries=urllib3.Retry(total=2, backoff_factor=0.2),
+            maxsize=10,
+        ),
     )
     return _client
 

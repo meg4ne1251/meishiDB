@@ -1,7 +1,7 @@
 # meishiDB リバースプロキシ
 #
 # 使い方:
-#   PUBLIC_HOST=meishi.example.com docker compose --profile proxy up
+#   PUBLIC_HOST=meishi.example.com docker compose -f docker-compose.yml -f production.yml --profile proxy up
 #
 # 公開 URL に出す場合は自動 TLS、内部 (Tailscale 等) のみなら `tls internal` を使う。
 
@@ -23,6 +23,9 @@
     }
 
     handle /api/* {
+        request_body {
+            max_size 16MB
+        }
         reverse_proxy api:8000
     }
 

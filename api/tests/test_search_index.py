@@ -51,7 +51,7 @@ def test_doc_for_card_with_fields():
     doc = search_index._doc_for_card(_Card(), _Fields())
     assert doc["id"] == str(_Card.id)
     assert doc["owner_id"] == str(_Card.owner_id)
-    assert doc["shared_with"] == []
+    assert "shared_with" not in doc
     assert doc["person_name"] == "山田"
     assert doc["company"] == "会社"
     assert doc["raw_ocr_text"] == "raw"
@@ -66,4 +66,4 @@ def test_doc_for_card_without_fields():
     doc = search_index._doc_for_card(_Card(), None)
     assert doc["person_name"] is None
     assert doc["company"] is None
-    assert doc["shared_with"] == []
+    assert "shared_with" not in doc

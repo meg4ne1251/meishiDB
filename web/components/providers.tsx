@@ -1,10 +1,18 @@
 "use client";
 
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 
-export function Providers({ children }: { children: ReactNode }) {
+export function Providers({ children, userId }: { children: ReactNode; userId: string | null }) {
+  return (
+    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+      <SessionQueries key={userId ?? "anonymous"}>{children}</SessionQueries>
+    </ThemeProvider>
+  );
+}
+
+function SessionQueries({ children }: { children: ReactNode }) {
   const [client] = useState(
     () =>
       new QueryClient({
@@ -14,9 +22,10 @@ export function Providers({ children }: { children: ReactNode }) {
       }),
   );
 
-  return (
-    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
-    </ThemeProvider>
-  );
+  useEffect(() => () => {
+    void client.cancelQueries();
+    client.clear();
+  }, [client]);
+
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
