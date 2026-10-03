@@ -9,7 +9,9 @@ import type {
   Card,
   CardGeoResponse,
   CardListResponse,
+  CardMemo,
   CurrentUser,
+  MemoListResponse,
   PasskeyCredential,
   ShareInfo,
   Tag,
@@ -196,6 +198,13 @@ export const cardsApi = {
     api<ShareInfo>(`/cards/${id}/shares`, { method: "POST", body }),
   unshare: (id: string, share_id: string) =>
     api<void>(`/cards/${id}/shares/${share_id}`, { method: "DELETE" }),
+  listMemos: (id: string) => api<MemoListResponse>(`/cards/${id}/memos`),
+  createMemo: (id: string, body: string) =>
+    api<CardMemo>(`/cards/${id}/memos`, { method: "POST", body: { body } }),
+  updateMemo: (id: string, memoId: string, body: string) =>
+    api<CardMemo>(`/cards/${id}/memos/${memoId}`, { method: "PATCH", body: { body } }),
+  deleteMemo: (id: string, memoId: string) =>
+    api<void>(`/cards/${id}/memos/${memoId}`, { method: "DELETE" }),
 };
 
 // ---- Export ----

@@ -1,7 +1,9 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 
 class CardFieldsBase(BaseModel):
@@ -69,6 +71,26 @@ class CardListResponse(BaseModel):
 
 class CardDetail(CardSummary):
     pass
+
+
+class MemoWrite(BaseModel):
+    body: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=5000)]
+
+
+class MemoRead(BaseModel):
+    id: UUID
+    card_id: UUID
+    author_id: UUID
+    author_name: str
+    body: str
+    created_at: datetime
+    can_edit: bool
+    can_delete: bool
+
+
+class MemoListResponse(BaseModel):
+    items: list[MemoRead]
+    can_create: bool
 
 
 class CardGeoPoint(BaseModel):

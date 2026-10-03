@@ -4,12 +4,12 @@
 
 | コンポーネント | フレームワーク | テスト数 | 必要なもの |
 |---|---|---|---|
-| `api/` (FastAPI) | pytest + pytest-asyncio | 142 | **Docker**（テスト用 `postgres:16` を自動起動） |
+| `api/` (FastAPI) | pytest + pytest-asyncio | 155 | **Docker**（テスト用 `postgres:16` を自動起動） |
 | `ocr/` | pytest | 23 (+1 skip) | なし（PaddleOCR は不要・モック） |
 | `scanner-watcher/` | pytest | 17 | なし |
-| `web/` (Next.js) | Vitest + jsdom | 16 | Node.js |
+| `web/` (Next.js) | Vitest + jsdom | 21 | Node.js |
 
-合計 **198 テスト**。
+合計 **216 テスト**（別途 OCR 実モデルのテスト1件は依存未導入時に skip）。
 
 ---
 
@@ -46,7 +46,7 @@ python3 -m venv .venv
 
 `auth`（登録/ログイン/ログアウト/セッション）、`deps`（セッション解決・admin 権限）、
 `security`（Argon2 ハッシュ）、`tags`、`cards`（CRUD / 一覧フィルタ / 検索 ILIKE /
-お気に入り / アクセス制御）、`cards/geo`、`shares`（権限）、画像アップロード・OCR、
+お気に入り / アクセス制御）、`cards/geo`、`shares`（権限）、`memos`（CRUD / 本文検証 / 共有・投稿者権限 / 共有解除 / 監査）、画像アップロード・OCR、
 `scanner` 取り込み、`export`（CSV/vCard）、`users` 検索、`webauthn`、監査ログ、
 および `geocoder` / `ocr_client` / `search_index` サービス。
 
@@ -91,6 +91,7 @@ python3 -m venv .venv
 
 `lib/utils.ts`（`cn`）と `lib/api.ts`（fetch ラッパ・`ApiError`・クエリ文字列生成）を
 Vitest でテストします。`fetch` はモック。
+`components/card-memos` は React DOM で表示・追加失敗時の入力保持・再試行・編集・削除確認・閲覧権限・本文の安全な表示も検証します。
 
 ```bash
 cd web

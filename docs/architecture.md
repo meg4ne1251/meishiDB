@@ -198,7 +198,7 @@ audit_logs (
 )
 ```
 
-**監査対象アクション**: `login`, `login_failed`, `logout`, `card.view`, `card.create`, `card.update`, `card.delete`, `card.share`, `card.export`, `passkey.register`, `passkey.delete`
+**監査対象アクション**: `login`, `login_failed`, `logout`, `card.view`, `card.create`, `card.update`, `card.delete`, `card.share`, `card.share_revoke`, `card.export`, `card.memo_create`, `card.memo_update`, `card.memo_delete`, `passkey.register`, `passkey.delete`
 
 ---
 
@@ -233,6 +233,13 @@ audit_logs (
 - CSV と vCard 3.0
 - 範囲: 選択した名刺 / 検索結果全部 / 自分の全名刺
 - エクスポート時に `audit_logs` (`card.export`) を必ず記録
+
+### メモ（実装済み）
+
+- 名刺詳細で自由記述メモを追加・編集・削除。投稿者と作成日時を表示し、新しい順に並べる。
+- 本文は前後の空白を除去して1〜5000文字。改行は保持する。
+- 名刺所有者は全メモを管理、`edit` 共有先は追加と自分のメモの編集・削除、`view` 共有先は閲覧のみ。共有解除後は投稿者でもアクセス不可。
+- `card_memos` の既存スキーマを利用。変更の監査ログにはメモIDを記録し、本文を複製しない。
 
 ### 4.5 認証フロー
 

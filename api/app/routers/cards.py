@@ -23,7 +23,7 @@ from sqlalchemy.orm import selectinload
 from app.core.db import SessionLocal, get_db
 from app.core.logging import log
 from app.deps import get_current_user
-from app.models.card import Card, CardField, CardShare, CardTag, Favorite, OCR_FIELD_NAMES
+from app.models.card import Card, CardField, CardMemo, CardShare, CardTag, Favorite, OCR_FIELD_NAMES
 from app.models.tag import Tag
 from app.models.user import User
 from app.schemas.card import (
@@ -35,6 +35,9 @@ from app.schemas.card import (
     CardListResponse,
     CardSummary,
     CardUpdate,
+    MemoListResponse,
+    MemoRead,
+    MemoWrite,
     ShareInfo,
     ShareRequest,
     TagSummary,
@@ -635,6 +638,146 @@ async def _apply_ocr_result(db: AsyncSession, card: Card, result: dict) -> None:
     await db.refresh(card)
 
 
+# ---------------- memos ----------------
+
+
+def _serialize_memo(memo: CardMemo, author_name: str, *, can_manage: bool) -> MemoRead:
+    return MemoRead(
+        id=memo.id,
+        card_id=memo.card_id,
+        author_id=memo.author_id,
+        author_name=author_name,
+        body=memo.body,
+        created_at=memo.created_at,
+        can_edit=can_manage,
+        can_delete=can_manage,
+    )
+
+
+@router.get("/{card_id}/memos", response_model=MemoListResponse)
+async def list_memos(
+    card_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MemoListResponse:
+    card, shared = await _ensure_access(db, card_id, user)
+    can_create = not shared
+    if shared:
+        permission = await db.scalar(
+            select(CardShare.permission).where(
+                CardShare.card_id == card_id, CardShare.shared_with == user.id
+            )
+        )
+        can_create = permission == "edit"
+    rows = await db.execute(
+        select(CardMemo, User.display_name)
+        .join(User, User.id == CardMemo.author_id)
+        .where(CardMemo.card_id == card_id)
+        .order_by(CardMemo.created_at.desc(), CardMemo.id.desc())
+    )
+    return MemoListResponse(
+        items=[
+            _serialize_memo(
+                memo,
+                author_name,
+                can_manage=can_create and (card.owner_id == user.id or memo.author_id == user.id),
+            )
+            for memo, author_name in rows
+        ],
+        can_create=can_create,
+    )
+
+
+@router.post("/{card_id}/memos", response_model=MemoRead, status_code=status.HTTP_201_CREATED)
+async def create_memo(
+    card_id: UUID,
+    payload: MemoWrite,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MemoRead:
+    await _ensure_access(db, card_id, user, need_edit=True)
+    memo = CardMemo(card_id=card_id, author_id=user.id, body=payload.body)
+    db.add(memo)
+    await db.flush()
+    await audit.record(
+        db,
+        user_id=user.id,
+        action="card.memo_create",
+        request=request,
+        target_type="card",
+        target_id=card_id,
+        metadata={"memo_id": str(memo.id)},
+    )
+    await db.commit()
+    await db.refresh(memo)
+    return _serialize_memo(memo, user.display_name, can_manage=True)
+
+
+async def _ensure_memo_editable(
+    db: AsyncSession, card_id: UUID, memo_id: UUID, user: User
+) -> CardMemo:
+    card, _ = await _ensure_access(db, card_id, user, need_edit=True)
+    memo = await db.scalar(
+        select(CardMemo).where(CardMemo.id == memo_id, CardMemo.card_id == card_id)
+    )
+    if memo is None:
+        raise HTTPException(status_code=404, detail="memo not found")
+    if card.owner_id != user.id and memo.author_id != user.id:
+        raise HTTPException(status_code=403, detail="only owner or author can modify memo")
+    return memo
+
+
+@router.patch("/{card_id}/memos/{memo_id}", response_model=MemoRead)
+async def update_memo(
+    card_id: UUID,
+    memo_id: UUID,
+    payload: MemoWrite,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MemoRead:
+    memo = await _ensure_memo_editable(db, card_id, memo_id, user)
+    memo.body = payload.body
+    author_name = (
+        await db.execute(select(User.display_name).where(User.id == memo.author_id))
+    ).scalar_one()
+    await audit.record(
+        db,
+        user_id=user.id,
+        action="card.memo_update",
+        request=request,
+        target_type="card",
+        target_id=card_id,
+        metadata={"memo_id": str(memo.id)},
+    )
+    await db.commit()
+    await db.refresh(memo)
+    return _serialize_memo(memo, author_name, can_manage=True)
+
+
+@router.delete("/{card_id}/memos/{memo_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_memo(
+    card_id: UUID,
+    memo_id: UUID,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    memo = await _ensure_memo_editable(db, card_id, memo_id, user)
+    await db.delete(memo)
+    await audit.record(
+        db,
+        user_id=user.id,
+        action="card.memo_delete",
+        request=request,
+        target_type="card",
+        target_id=card_id,
+        metadata={"memo_id": str(memo_id)},
+    )
+    await db.commit()
+
+
 # ---------------- favorites / share ----------------
 
 
@@ -738,6 +881,7 @@ async def create_share(
 async def delete_share(
     card_id: UUID,
     share_id: UUID,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -747,7 +891,19 @@ async def delete_share(
     card = await db.get(Card, card_id)
     if card is None or card.owner_id != user.id:
         raise HTTPException(status_code=403, detail="only owner can revoke")
+    revoked_with = share.shared_with
+    revoked_permission = share.permission
     await db.delete(share)
+    await db.flush()
+    await audit.record(
+        db,
+        user_id=user.id,
+        action="card.share_revoke",
+        request=request,
+        target_type="card",
+        target_id=card_id,
+        metadata={"shared_with": str(revoked_with), "permission": revoked_permission},
+    )
     await db.flush()
     try:
         await _sync_shares_to_search(db, card_id)

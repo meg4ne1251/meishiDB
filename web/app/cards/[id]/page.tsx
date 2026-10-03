@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CardImageCapture } from "@/components/card-image-capture";
+import { CardMemos } from "@/components/card-memos";
 import {
   Dialog,
   DialogContent,
@@ -420,6 +421,7 @@ export default function CardDetailPage() {
           </Button>
         </div>
       </form>
+      <CardMemos key={cardId} cardId={cardId} />
     </div>
   );
 }

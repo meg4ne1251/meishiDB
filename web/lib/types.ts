@@ -77,6 +77,22 @@ export interface CardListResponse {
   total: number;
 }
 
+export interface CardMemo {
+  id: string;
+  card_id: string;
+  author_id: string;
+  author_name: string;
+  body: string;
+  created_at: string;
+  can_edit: boolean;
+  can_delete: boolean;
+}
+
+export interface MemoListResponse {
+  items: CardMemo[];
+  can_create: boolean;
+}
+
 export interface CurrentUser {
   id: string;
   email: string;

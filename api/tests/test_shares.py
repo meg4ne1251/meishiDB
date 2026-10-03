@@ -1,5 +1,9 @@
 """共有（card_shares）と共有相手のアクセス権。"""
 
+from sqlalchemy import select
+
+from app.models.audit import AuditLog
+
 
 async def _create_card(client, **fields):
     r = await client.post("/api/cards", json={"source": "manual", "fields": fields})
@@ -179,6 +183,31 @@ async def test_delete_share_revokes_access(make_user):
 
     # 取り消し後は 404
     assert (await target_c.get(f"/api/cards/{card['id']}")).status_code == 404
+
+
+async def test_delete_share_records_audit(make_user, db):
+    owner_c, owner = await make_user(email="audit-owner@example.com")
+    _, target = await make_user(email="audit-target@example.com")
+    card = await _create_card(owner_c)
+    share = (
+        await owner_c.post(
+            f"/api/cards/{card['id']}/shares",
+            json={"user_email": "audit-target@example.com", "permission": "edit"},
+        )
+    ).json()
+
+    r = await owner_c.delete(f"/api/cards/{card['id']}/shares/{share['id']}")
+    assert r.status_code == 204
+
+    row = await db.scalar(
+        select(AuditLog).where(
+            AuditLog.user_id == owner["id"], AuditLog.action == "card.share_revoke"
+        )
+    )
+    assert row is not None
+    assert row.target_id == card["id"]
+    assert row.audit_metadata["shared_with"] == target["id"]
+    assert row.audit_metadata["permission"] == "edit"
 
 
 async def test_delete_share_wrong_card_404(make_user):
