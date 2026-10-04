@@ -5,11 +5,29 @@
 | コンポーネント | フレームワーク | テスト数 | 必要なもの |
 |---|---|---|---|
 | `api/` (FastAPI) | pytest + pytest-asyncio | 235 | **Docker**（テスト用 `postgres:16` を自動起動） |
-| `ocr/` | pytest | 72 (+1 skip) | なし（PaddleOCR は不要・モック） |
+| `ocr/` | pytest | 86 (+1 skip) | なし（PaddleOCR は不要・モック） |
 | `scanner-watcher/` | pytest | 21 | なし |
 | `web/` (Next.js) | Vitest + jsdom | 39 | Node.js |
 
-合計 **367 テスト**（別途 OCR 実モデルのテスト1件は依存未導入時に skip）。
+合計 **381 テスト**（別途 OCR 実モデルのテスト1件は依存未導入時に skip）。
+
+2026-10-04の実環境再検証では、最終OCRイメージの実モデル込み87件も成功。
+HTTPS結合・ブラウザ・スキャナ・依存監査の結果は
+[`docs/runtime-validation-2026-10-04.md`](docs/runtime-validation-2026-10-04.md)を参照。
+
+実HTTPSのセキュリティチェックは専用テストアカウントで実行します。
+合成名刺を1件作成・削除するため、運用利用者のアカウントは使わないでください。
+アカウントJSONは`admin_email`と`password`を含む既存の非公開ファイルを指定します。
+
+```bash
+python deploy/checks/security_runtime.py \
+  --accounts deploy/test-accounts.json --ca deploy/test-root-ca.crt \
+  --output /tmp/security-results.json
+```
+
+`--check-rate-limit`を付けると同じ接続元のパスキーログイン完了APIに
+21回の不正要求を送り、429を確認します。直後のパスキー試験と併走しないでください。
+実OCRサービスの比較は[`ocr/evaluation/README.md`](ocr/evaluation/README.md)を参照。
 
 ---
 

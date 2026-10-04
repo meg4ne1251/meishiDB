@@ -20,6 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml ./
 RUN pip install --upgrade pip && pip install -e .
+# Python 3.10's base image includes an older setuptools; update the build tooling
+# separately from the OCR dependencies (CVE-2026-59890).
+RUN pip install --upgrade "setuptools>=83.0.0"
 
 COPY . .
 

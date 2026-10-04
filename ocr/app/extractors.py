@@ -119,11 +119,14 @@ def extract_fields(lines: list[OcrLine]) -> tuple[dict, dict, str]:
     address_candidates = []
     for line in lines:
         norm = _normalize(line.text)
-        norm = POSTAL_RE.sub("", norm).strip(" 〒,:")
         prefecture = re.search(r"東京都|北海道|京都府|大阪府|[一-龥]{2,3}県", norm)
         if prefecture and re.search(r"\d", norm[:prefecture.start()]):
             # A corrupted postal prefix must not contaminate the street address.
             norm = norm[prefecture.start():]
+        norm = POSTAL_RE.sub("", norm).strip(" 〒,:")
+        # Damaged contact numbers still must not become the street address.
+        if re.match(r"^(?:TEL|FAX|MOBILE|E[- ]?mail|電話|携帯)\s*[:：]", norm, re.IGNORECASE):
+            continue
         if COMPANY_HINT.search(norm) or TITLE_HINT.search(norm) or norm == fields.get("company"):
             continue
         if ADDRESS_HINT.search(norm) and len(norm) >= 8:

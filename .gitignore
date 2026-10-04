@@ -29,4 +29,5 @@ Thumbs.db
 # Local verification reports, data, images, and evaluation tools
 /docs/deployment-test-*.md
 /docs/test-artifacts/
-/ocr/evaluation/
+/ocr/evaluation/*
+!/ocr/evaluation/http_corpus.py

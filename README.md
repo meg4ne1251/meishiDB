@@ -194,3 +194,7 @@ Meilisearch検索は200件ずつ取得し、ページ送り・CSV/vCardにも同
 [`docs/review-followup-2026-10-04.md`](docs/review-followup-2026-10-04.md)を参照してください。
 その後の再レビュー、スキャナ/OCRの追加修正、ローカル依存の再監査は
 [`docs/review-final-2026-10-04.md`](docs/review-final-2026-10-04.md)を参照してください。
+
+`ssh test` での最新版反映、実HTTPS・ブラウザ・スキャナの再検証、
+OCR完全一致72/100→87/100の改善と実コンテナの依存監査は
+[`docs/runtime-validation-2026-10-04.md`](docs/runtime-validation-2026-10-04.md)を参照してください。

@@ -26,6 +26,10 @@ _EMAIL_CANDIDATE_RE = re.compile(r"[A-Za-z0-9._%+\-]+\.[A-Za-z]{2,}")
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
 
+def _normalize_email_spacing(text: str) -> str:
+    return re.sub(r"\s*([@.])\s*", r"\1", unicodedata.normalize("NFKC", text)).strip()
+
+
 def _get_ocr():
     global _ocr_instance
     if _ocr_instance is not None:
@@ -140,7 +144,7 @@ def _reread_email(line: OcrLine, image: np.ndarray) -> OcrLine:
         recognized = _get_english_ocr().ocr(crop, det=False, cls=False)
         if recognized and recognized[0]:
             candidate, confidence = recognized[0][0]
-            candidate = unicodedata.normalize("NFKC", candidate).strip()
+            candidate = _normalize_email_spacing(candidate)
             if confidence >= 0.8 and _EMAIL_RE.fullmatch(candidate):
                 return OcrLine(candidate, float(confidence), line.bbox, line.height)
     except Exception:
@@ -213,6 +217,8 @@ def _reread_contacts(lines: list[OcrLine], img: np.ndarray) -> list[OcrLine]:
             if recognized and recognized[0]:
                 text, conf = recognized[0][0]
                 text = unicodedata.normalize("NFKC", text).strip()
+                if is_email:
+                    text = _normalize_email_spacing(text)
                 from .extractors import PHONE_RE
                 valid = _EMAIL_RE.search(text) if is_email else PHONE_RE.search(text)
                 if conf >= .8 and valid:
@@ -238,6 +244,54 @@ def _reread_contacts(lines: list[OcrLine], img: np.ndarray) -> list[OcrLine]:
             result.append(replacement)
         else:
             result.append(line)
+    return result
+
+
+def _reread_postal_codes(lines: list[OcrLine], img: np.ndarray) -> list[OcrLine]:
+    """Verify damaged 3-4 digit postal regions next to a Japanese address.
+
+    Never guess digits: require an English recognition result, high confidence,
+    and agreement with every digit already read by the Japanese model.
+    """
+    result = []
+    for line in lines:
+        norm = unicodedata.normalize("NFKC", line.text).strip()
+        match = re.fullmatch(r"[〒FT-]?\s*([A-Za-z0-9øØ]{3})-([A-Za-z0-9øØ]{4})", norm)
+        if not match or all(part.isdigit() for part in match.groups()):
+            result.append(line)
+            continue
+        original = "".join(match.groups())
+        adjacent_address = any(
+            _shares_row(line, other)
+            and 0 <= other.x_left - line.x_right <= 2 * line.height
+            and re.match(r"東京都|北海道|京都府|大阪府|[一-龥]{2,3}県", other.text)
+            for other in lines if other is not line
+        )
+        if sum(char.isdigit() for char in original) < 3 or not adjacent_address:
+            result.append(line)
+            continue
+        pad = max(2, math.ceil(line.height * .25))
+        h, w = img.shape[:2]
+        crop = img[max(0, math.floor(line.y_top)-pad):min(h, math.ceil(line.y_bottom)+pad),
+                   max(0, math.floor(line.x_left)-pad):min(w, math.ceil(line.x_right)+pad)]
+        replacement = line
+        try:
+            recognized = _get_english_ocr().ocr(crop, det=False, cls=False) if crop.size else None
+            if recognized and recognized[0]:
+                text, conf = recognized[0][0]
+                candidate = re.fullmatch(
+                    r"[〒FT-]?\s*(\d{3})\s*-\s*(\d{4})",
+                    unicodedata.normalize("NFKC", text).strip(),
+                )
+                if candidate and conf >= .9:
+                    digits = "".join(candidate.groups())
+                    if all(not old.isdigit() or old == new for old, new in zip(original, digits)):
+                        replacement = OcrLine(
+                            f"〒{candidate[1]}-{candidate[2]}", float(conf), line.bbox, line.height,
+                        )
+        except Exception:
+            logger.warning("Postal recognition failed; retaining original text", exc_info=True)
+        result.append(replacement)
     return result
 
 
@@ -277,4 +331,4 @@ def run_ocr(image_bytes: bytes) -> list[OcrLine]:
             score = _orientation_score(candidate)
             if score > best_score + .5:
                 lines, img, best_score = candidate, candidate_image, score
-    return _merge_row_fragments(_reread_contacts(lines, img))
+    return _merge_row_fragments(_reread_contacts(_reread_postal_codes(lines, img), img))

@@ -221,3 +221,17 @@ def test_surnames_and_long_latin_names(name):
 def test_long_vowel_before_floor_number_is_preserved():
     assert _normalize('タワー8F') == 'タワー8F'
     assert _normalize('03ー1234ー5678') == '03-1234-5678'
+
+
+def test_misread_postal_mark_removed_with_valid_postal_number():
+    fields, _, _ = extract_fields([line('F100-0001 東京都千代田区丸の内1-1-1')])
+    assert fields['postal_code'] == '100-0001'
+    assert fields['address'] == '東京都千代田区丸の内1-1-1'
+
+
+def test_damaged_contact_row_does_not_override_address():
+    fields, _, _ = extract_fields([
+        line('TEL:03-12B4-567日 FAH:0日-12ヨ4-ヨ9ヨ号'),
+        line('東京都千代田区丸の内1-1-1'),
+    ])
+    assert fields['address'] == '東京都千代田区丸の内1-1-1'

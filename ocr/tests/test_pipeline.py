@@ -206,3 +206,80 @@ def test_decode_narrow_image_keeps_nonzero_dimensions(size):
     decoded = _decode_image(image.getvalue())
     assert min(decoded.shape[:2]) == 1
     assert max(decoded.shape[:2]) == 2200
+
+
+def test_contact_reread_accepts_spaces_around_email_punctuation(monkeypatch):
+    from app.pipeline import _reread_contacts
+
+    class Recognizer:
+        def ocr(self, image, **kwargs):
+            return [[('E-mai l: taro @ example. com', .98)]]
+
+    monkeypatch.setattr('app.pipeline._get_english_ocr', lambda: Recognizer())
+    lines = [fragment('E-mail: tarogexam', 5, 5, width=90), fragment('ple.com', 85, 5, width=55)]
+    result = _reread_contacts(lines, np.zeros((50, 200, 3), dtype=np.uint8))
+    assert len(result) == 1
+    from app.extractors import extract_fields
+    assert extract_fields(result)[0]['email'] == 'taro@example.com'
+
+
+def test_bare_email_reread_accepts_punctuation_spaces(monkeypatch):
+    class Recognizer:
+        def ocr(self, image, **kwargs):
+            return [[('taro@example. com', .98)]]
+
+    monkeypatch.setattr('app.pipeline._get_english_ocr', lambda: Recognizer())
+    result = _reread_email(fragment('tarogexample.com', 5, 5), np.zeros((50, 200, 3), dtype=np.uint8))
+    assert result.text == 'taro@example.com'
+
+
+@pytest.mark.parametrize('recognized, confidence, accepted', [
+    ('T100-0001', .99, True),
+    ('〒１００－０００１', .98, True),
+    ('100-0001', .7, False),
+    ('100-0002', .99, False),
+    ('100-00O1', .99, False),
+])
+def test_postal_reread_requires_recognized_digits_and_preserves_known_digits(
+    monkeypatch, recognized, confidence, accepted,
+):
+    from app.pipeline import _reread_postal_codes
+
+    class Recognizer:
+        def ocr(self, image, **kwargs):
+            return [[(recognized, confidence)]]
+
+    monkeypatch.setattr('app.pipeline._get_english_ocr', lambda: Recognizer())
+    postal = fragment('F100-00ø1', 5, 5)
+    address = fragment('東京都千代田区丸の内1-1-1', 95, 5)
+    result = _reread_postal_codes([postal, address], np.zeros((50, 200, 3), dtype=np.uint8))
+    assert result[0].text == ('〒100-0001' if accepted else postal.text)
+    assert result[1] is address
+
+
+@pytest.mark.parametrize('postal, address', [
+    ('〒100-0001', fragment('東京都千代田区', 95, 5)),
+    ('F100-00ø1', fragment('東京都千代田区', 300, 5)),
+    ('F100-00ø1', fragment('東京都千代田区', 95, 60)),
+    ('F100-00ø1', fragment('商品コード', 95, 5)),
+])
+def test_postal_reread_does_not_guess_without_nearby_address(monkeypatch, postal, address):
+    from app.pipeline import _reread_postal_codes
+
+    def unexpected():
+        pytest.fail('English model should not be used')
+
+    monkeypatch.setattr('app.pipeline._get_english_ocr', unexpected)
+    lines = [fragment(postal, 5, 5), address]
+    assert _reread_postal_codes(lines, np.zeros((100, 500, 3), dtype=np.uint8)) == lines
+
+
+def test_postal_reread_failure_preserves_original(monkeypatch):
+    from app.pipeline import _reread_postal_codes
+
+    def unavailable():
+        raise RuntimeError('model unavailable')
+
+    monkeypatch.setattr('app.pipeline._get_english_ocr', unavailable)
+    lines = [fragment('F100-00ø1', 5, 5), fragment('東京都千代田区', 95, 5)]
+    assert _reread_postal_codes(lines, np.zeros((50, 200, 3), dtype=np.uint8)) == lines
