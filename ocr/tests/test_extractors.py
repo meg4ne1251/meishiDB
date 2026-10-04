@@ -147,3 +147,77 @@ def test_empty_input():
     assert fields == {}
     assert conf == {}
     assert raw == ""
+
+
+@pytest.mark.parametrize('text, expected', [
+    ('TEL (03) 1234-5678', '03 1234-5678'),
+    ('TEL 03（1234）5678', '0312345678'),
+    ('TEL 03−1234−5678', '03-1234-5678'),
+])
+def test_phone_notation_variants(text, expected):
+    fields, _, _ = extract_fields([line(text)])
+    assert fields['phone'] == expected
+    assert 'postal_code' not in fields
+
+
+def test_shared_contact_row():
+    fields, _, _ = extract_fields([line('TEL:03-1234-5678 FAX:03-1234-9999 MOBILE:+81-90-1234-5678')])
+    assert fields['phone'] == '03-1234-5678'
+    assert fields['fax'] == '03-1234-9999'
+    assert fields['mobile'] == '+81-90-1234-5678'
+
+
+def test_spaced_email_punctuation():
+    fields, _, _ = extract_fields([line('E-mail: taro @ example . com')])
+    assert fields['email'] == 'taro@example.com'
+
+
+@pytest.mark.parametrize('company', ['(株)東京商事', '医療法人山田医院', 'ACME ltd.', 'Example INC'])
+def test_company_variants_do_not_become_title_or_name(company):
+    fields, _, _ = extract_fields([line(company, height=40), line('山田 太郎', height=25)])
+    assert fields['company'] == company
+    assert fields['person_name'] == '山田 太郎'
+    assert 'title' not in fields
+
+
+def test_explicit_name_label():
+    fields, _, _ = extract_fields([line('CREATIVE', height=60), line('氏名: 山田 太郎')])
+    assert fields['person_name'] == '山田 太郎'
+
+
+def test_address_postal_and_building_continuation():
+    from app.pipeline import OcrLine
+    def row(text, x, y):
+        return OcrLine(text, .95, [[x,y],[x+200,y],[x+200,y+20],[x,y+20]],20)
+    fields, _, _ = extract_fields([
+        row('〒100-0001 東京都千代田区丸の内1-1-1',0,100),
+        row('丸の内ビル 8F',0,125), row('別のビル 2F',400,125),
+        row('山田 太郎',0,20),
+    ])
+    assert fields['address'] == '東京都千代田区丸の内1-1-1 丸の内ビル 8F'
+    assert fields['postal_code'] == '100-0001'
+    assert fields['person_name'] == '山田 太郎'
+
+
+def test_corrupted_postal_prefix_excluded_from_address_without_guessing():
+    fields, _, _ = extract_fields([line('F100-00ø1 東京都千代田区丸の内1-1-1')])
+    assert fields['address'] == '東京都千代田区丸の内1-1-1'
+    assert 'postal_code' not in fields
+
+
+def test_lowercase_english_title():
+    fields, _, _ = extract_fields([line('software engineer'), line('John Smith', height=30), line('Acme Ltd.')])
+    assert fields['title'] == 'software engineer'
+    assert fields['person_name'] == 'John Smith'
+
+
+@pytest.mark.parametrize('name', ['服部 太郎', '小室 花子', 'Alexander Montgomery', 'Jean-Pierre Dupont'])
+def test_surnames_and_long_latin_names(name):
+    fields, _, _ = extract_fields([line(name, height=40), line('営業部', height=20)])
+    assert fields['person_name'] == name
+    assert fields['title'] == '営業部'
+
+
+def test_long_vowel_before_floor_number_is_preserved():
+    assert _normalize('タワー8F') == 'タワー8F'
+    assert _normalize('03ー1234ー5678') == '03-1234-5678'

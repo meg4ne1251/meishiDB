@@ -163,23 +163,118 @@ def _decode_image(image_bytes: bytes) -> np.ndarray:
     return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
 
 
+def _recognize_lines(ocr, img: np.ndarray) -> list[OcrLine]:
+    raw = ocr.ocr(img, cls=True)
+    lines = []
+    for bbox, (text, conf) in (raw[0] if raw and raw[0] else []):
+        if text and text.strip():
+            height = max(p[1] for p in bbox) - min(p[1] for p in bbox)
+            lines.append(OcrLine(text.strip(), float(conf), bbox, float(height)))
+    return lines
+
+
+def _reread_contacts(lines: list[OcrLine], img: np.ndarray) -> list[OcrLine]:
+    """Re-read ASCII contact rows, including overlapping email detections.
+
+    Accept only actual recognized contact syntax at high confidence. Failed
+    recognition keeps all original fragments, without speculative corrections.
+    """
+    result = []
+    remaining = list(lines)
+    while remaining:
+        line = remaining.pop(0)
+        norm = unicodedata.normalize("NFKC", line.text)
+        if re.search(r"[\u3040-\u30ff\u3400-\u9fff]", norm):
+            result.append(_reread_email(line, img))
+            continue
+        is_email = bool(re.search(r"e[- ]?mail|@", norm, re.IGNORECASE))
+        is_phone = bool(re.search(r"(?:\d[- ()]*){9,}", norm))
+        if not (is_email or is_phone):
+            result.append(_reread_email(line, img))
+            continue
+        group = [line]
+        if is_email:
+            # Detector boxes can overlap in the middle of an email address.
+            for other in remaining:
+                if (_shares_row(line, other)
+                    and -line.height <= other.x_left - max(item.x_right for item in group) <= 1.5 * line.height
+                    and other.x_left >= line.x_left
+                    and re.fullmatch(r"[A-Za-z0-9.@_+%\- ]+", other.text)):
+                    group.append(other)
+        left, right = min(item.x_left for item in group), max(item.x_right for item in group)
+        top, bottom = min(item.y_top for item in group), max(item.y_bottom for item in group)
+        pad = max(2, math.ceil(line.height * .25))
+        h, w = img.shape[:2]
+        crop = img[max(0,math.floor(top)-pad):min(h,math.ceil(bottom)+pad),
+                   max(0,math.floor(left)-pad):min(w,math.ceil(right)+pad)]
+        replacement = None
+        try:
+            recognized = _get_english_ocr().ocr(crop, det=False, cls=False) if crop.size else None
+            if recognized and recognized[0]:
+                text, conf = recognized[0][0]
+                text = unicodedata.normalize("NFKC", text).strip()
+                from .extractors import PHONE_RE
+                valid = _EMAIL_RE.search(text) if is_email else PHONE_RE.search(text)
+                if conf >= .8 and valid:
+                    if is_phone:
+                        # Preserve already recognized numbers and their separators;
+                        # use English to repair labels, never overwrite a different number.
+                        original_numbers = list(PHONE_RE.finditer(norm))
+                        new_numbers = list(PHONE_RE.finditer(text))
+                        if len(original_numbers) != len(new_numbers) or any(
+                            re.sub(r"\D", "", first.group()) != re.sub(r"\D", "", second.group())
+                            for first, second in zip(original_numbers, new_numbers)
+                        ):
+                            result.append(line)
+                            continue
+                        for first, second in reversed(list(zip(original_numbers, new_numbers))):
+                            text = text[:second.start()] + first.group() + text[second.end():]
+                    replacement = OcrLine(text, float(conf),
+                        [[left,top],[right,top],[right,bottom],[left,bottom]], bottom-top)
+        except Exception:
+            logger.warning("Contact recognition failed; retaining original text", exc_info=True)
+        if replacement:
+            remaining = [other for other in remaining if all(other is not item for item in group[1:])]
+            result.append(replacement)
+        else:
+            result.append(line)
+    return result
+
+
+def _orientation_score(lines: list[OcrLine]) -> float:
+    from .extractors import extract_fields
+    fields, confidence, _ = extract_fields(lines)
+    # Identity words help distinguish upright text from confidently read digits.
+    identities = sum(confidence.get(key, 0) for key in ("company", "title"))
+    vertical_penalty = 6 * sum(line.height > 1.5 * (line.x_right - line.x_left) for line in lines) / max(1, len(lines))
+    company_rows = [line for line in lines if fields.get("company") == line.text]
+    contacts = [line for line in lines if re.search(r"@|(?:\d[- ()]*){9,}", line.text)]
+    inverted_penalty = 3 if company_rows and contacts and company_rows[0].y_top > max(line.y_top for line in contacts) else 0
+    return identities * 4 + sum(confidence.values()) - vertical_penalty - inverted_penalty + sum(
+        min(len(line.text), 40) * line.confidence for line in lines if line.confidence >= .8
+    ) / 100
+
+
 def run_ocr(image_bytes: bytes) -> list[OcrLine]:
-    """PaddleOCR を実行して行ごとのテキスト＋bbox を返す。"""
+    """Recognize text; bboxes refer to the resized, orientation-corrected image."""
     ocr = _get_ocr()
     img = _decode_image(image_bytes)
-
-    raw = ocr.ocr(img, cls=True)
-    if not raw or not raw[0]:
-        return []
-
-    lines: list[OcrLine] = []
-    for entry in raw[0]:
-        bbox, (text, conf) = entry
-        if not text or not text.strip():
-            continue
-        ys = [p[1] for p in bbox]
-        height = max(ys) - min(ys)
-        lines.append(
-            OcrLine(text=text.strip(), confidence=float(conf), bbox=bbox, height=float(height))
-        )
-    return _merge_row_fragments([_reread_email(line, img) for line in lines])
+    lines = _recognize_lines(ocr, img)
+    from .extractors import extract_fields
+    fields, confidence, _ = extract_fields(_merge_row_fragments(lines))
+    tall_boxes = sum(line.height > 1.5 * (line.x_right - line.x_left) for line in lines)
+    company_rows = [line for line in lines if fields.get("company") == line.text]
+    contact_rows = [line for line in lines if re.search(r"@|(?:\d[- ()]*){9,}", line.text)]
+    inverted_layout = bool(company_rows and contact_rows and
+        company_rows[0].y_top > max(line.y_top for line in contact_rows))
+    if (tall_boxes > len(lines) / 3 or inverted_layout or
+        not any(confidence.get(key, 0) >= .85 for key in ("company", "title"))):
+        best_score = _orientation_score(lines)
+        original = img
+        for turns in (1, 2, 3):
+            candidate_image = np.ascontiguousarray(np.rot90(original, turns))
+            candidate = _recognize_lines(ocr, candidate_image)
+            score = _orientation_score(candidate)
+            if score > best_score + .5:
+                lines, img, best_score = candidate, candidate_image, score
+    return _merge_row_fragments(_reread_contacts(lines, img))

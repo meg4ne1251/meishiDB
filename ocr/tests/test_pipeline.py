@@ -125,3 +125,75 @@ def test_run_ocr_smoke():
 
     result = run_ocr(_png_bytes(200, 120))
     assert isinstance(result, list)
+
+
+def test_contact_reread_joins_overlapping_email_fragments(monkeypatch):
+    from app.pipeline import _reread_contacts
+    class Recognizer:
+        def ocr(self, image, **kwargs):
+            assert image.shape[1] > 120
+            return [[('E-mail: taro@example.com', .96)]]
+    monkeypatch.setattr('app.pipeline._get_english_ocr', lambda: Recognizer())
+    lines = [fragment('E-mail: tarogexam', 5, 5, width=90), fragment('ple.com', 85, 5, width=55)]
+    result = _reread_contacts(lines, np.zeros((50, 200, 3), dtype=np.uint8))
+    assert len(result) == 1
+    assert result[0].text == 'E-mail: taro@example.com'
+    assert result[0].x_right == 140
+
+
+def test_contact_reread_low_confidence_keeps_fragments(monkeypatch):
+    from app.pipeline import _reread_contacts
+    class Recognizer:
+        def ocr(self, image, **kwargs):
+            return [[('taro@example.com', .6)]]
+    monkeypatch.setattr('app.pipeline._get_english_ocr', lambda: Recognizer())
+    lines = [fragment('E-mail: tarogexam', 5, 5, width=90), fragment('ple.com', 85, 5, width=55)]
+    assert _reread_contacts(lines, np.zeros((50, 200, 3), dtype=np.uint8)) == lines
+
+
+def test_orientation_fallback_selects_readable_card(monkeypatch):
+    import app.pipeline as pipeline
+    calls = []
+    def recognize(ocr, image):
+        calls.append(image.shape)
+        if len(calls) == 2:
+            return [fragment('株式会社テスト', 5, 5), fragment('山田 太郎', 5, 50, height=40)]
+        return [fragment('???', 5, 5, confidence=.4)]
+    monkeypatch.setattr(pipeline, '_get_ocr', lambda: object())
+    monkeypatch.setattr(pipeline, '_recognize_lines', recognize)
+    result = pipeline.run_ocr(_png_bytes(200, 120))
+    assert [item.text for item in result] == ['株式会社テスト', '山田 太郎']
+    assert len(calls) == 4
+
+
+def test_upright_company_avoids_rotation_passes(monkeypatch):
+    import app.pipeline as pipeline
+    calls = []
+    def recognize(ocr, image):
+        calls.append(1)
+        return [fragment('株式会社テスト', 5, 5)]
+    monkeypatch.setattr(pipeline, '_get_ocr', lambda: object())
+    monkeypatch.setattr(pipeline, '_recognize_lines', recognize)
+    assert pipeline.run_ocr(_png_bytes(200, 120))[0].text == '株式会社テスト'
+    assert len(calls) == 1
+
+
+def test_english_contact_preserves_original_phone_separator(monkeypatch):
+    from app.pipeline import _reread_contacts
+    class Recognizer:
+        def ocr(self, image, **kwargs):
+            return [[('TEL:031234-5678', .95)]]
+    monkeypatch.setattr('app.pipeline._get_english_ocr', lambda: Recognizer())
+    original = fragment('TEL:03-1234-5678', 5, 5)
+    result = _reread_contacts([original], np.zeros((50,200,3),dtype=np.uint8))
+    assert result[0].text == 'TEL:03-1234-5678'
+
+
+def test_english_contact_cannot_change_phone_digits(monkeypatch):
+    from app.pipeline import _reread_contacts
+    class Recognizer:
+        def ocr(self, image, **kwargs):
+            return [[('TEL:03-1234-5679', .99)]]
+    monkeypatch.setattr('app.pipeline._get_english_ocr', lambda: Recognizer())
+    original = fragment('TEL:03-1234-5678', 5, 5)
+    assert _reread_contacts([original], np.zeros((50,200,3),dtype=np.uint8)) == [original]

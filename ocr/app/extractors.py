@@ -1,6 +1,6 @@
 """OCR 行から名刺フィールドを抽出。
 
-正規表現＋位置ヒューリスティクスのみ。MVP として「うまく取れたら出す、取れなければ null」方針。
+表記の正規化、連絡先ラベル、領域の位置を使って名刺フィールドを抽出。
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 URL_RE = re.compile(r"\b(?:https?://|www\.)[A-Za-z0-9./_\-?=&%#]+", re.IGNORECASE)
 POSTAL_RE = re.compile(r"(?<![\d-])〒?\s?(\d{3})-?(\d{4})(?![\d-])")
 PHONE_RE = re.compile(
-    r"(?<![\d-])(?:\+?81[-\s]?(?:\d[-\s]?){8,9}\d|0(?:\d[-\s]?){8,9}\d)(?![\d-])"
+    r"(?<![\d-])(?:\+?81[-\s()]*(?:\d[-\s()]*){8,9}\d|0[-\s()]*(?:\d[-\s()]*){8,9}\d)(?![\d-])"
 )
 MOBILE_PREFIX = ("070", "080", "090")
 FAX_HINT = re.compile(r"(?:FAX|Fax|fax|ＦＡＸ)", re.IGNORECASE)
@@ -25,15 +25,17 @@ MOBILE_HINT = re.compile(r"(?:MOBILE|Mobile|携帯)", re.IGNORECASE)
 ADDRESS_HINT = re.compile(
     r"(都|道|府|県|市|区|町|村|丁目|番地|番|号|[０-９0-9]+\-[０-９0-9]+)"
 )
-COMPANY_HINT = re.compile(r"(株式会社|有限会社|合同会社|合資会社|Co\.,?\s?Ltd\.?|Inc\.|Corporation|Corp\.|LLC)")
+COMPANY_HINT = re.compile(r"(株式会社|有限会社|合同会社|合資会社|一般社団法人|公益財団法人|医療法人|学校法人|\(株\)|\(有\)|Co\.,?\s?Ltd\.?|Inc\.?\b|Corporation|Corp\.?\b|LLC\b|Ltd\.?\b)", re.IGNORECASE)
 TITLE_HINT = re.compile(
-    r"(部長|課長|係長|主任|社長|代表|取締役|専務|常務|部|室|課|チーム|マネージャー|"
-    r"Manager|Director|Engineer|CEO|CTO|CFO|COO|President)"
+    r"(部長|課長|係長|主任|社長|代表|取締役|専務|常務|(?:営業|開発|技術|総務|人事|経理|企画|研究|広報|販売|事業|情報|管理|製造|品質|保証|生産|設計|マーケティング)[一-龥ァ-ヶA-Za-z]*[部室課]|チーム|マネージャー|"
+    r"Manager|Director|Engineer|CEO|CTO|CFO|COO|President|デザイナー|弁護士|税理士|教授|医師)",
+    re.IGNORECASE,
 )
 
 
 def _normalize(text: str) -> str:
-    return unicodedata.normalize("NFKC", text).strip()
+    text = unicodedata.normalize("NFKC", text).strip()
+    return re.sub(r"(?<=\d)[‐‑‒–—−ー](?=\d)", "-", text)
 
 
 def _classify_phone(text: str) -> str:
@@ -46,7 +48,7 @@ def _classify_phone(text: str) -> str:
     digits_match = PHONE_RE.search(norm)
     if digits_match:
         digits = re.sub(r"\D", "", digits_match.group())
-        if digits.startswith(MOBILE_PREFIX):
+        if digits.startswith(MOBILE_PREFIX) or digits.startswith(("8170", "8180", "8190")):
             return "mobile"
     return "phone"
 
@@ -66,9 +68,11 @@ def extract_fields(lines: list[OcrLine]) -> tuple[dict, dict, str]:
     # --- 単純 regex 系 ---
     for line in lines:
         norm = _normalize(line.text)
+        # Spaces around actual email punctuation are common in OCR. Never invent @.
+        contact = re.sub(r"\s*([@.])\s*", r"\1", norm)
 
         # email
-        m = EMAIL_RE.search(norm)
+        m = EMAIL_RE.search(contact)
         if m:
             set_field("email", m.group(), line.confidence)
 
@@ -86,10 +90,16 @@ def extract_fields(lines: list[OcrLine]) -> tuple[dict, dict, str]:
             set_field("postal_code", f"{m.group(1)}-{m.group(2)}", line.confidence)
 
         # phone / mobile / fax
-        m = PHONE_RE.search(norm)
-        if m:
-            kind = _classify_phone(norm)
-            set_field(kind, m.group(), line.confidence)
+        previous_end = 0
+        for m in PHONE_RE.finditer(norm):
+            # Associate each number with its own preceding label on a shared row.
+            prefix = norm[previous_end:m.start()]
+            labels = list(re.finditer(r"FAX|TEL|MOBILE|携帯|電話", prefix, re.IGNORECASE))
+            hint = labels[-1].group() if labels else ""
+            kind = _classify_phone(hint + " " + m.group())
+            value = re.sub(r"[()]", "", m.group()).strip()
+            set_field(kind, value, line.confidence)
+            previous_end = m.end()
 
     # --- 会社名（上方の行＋"株式会社"等） ---
     for line in lines:
@@ -101,7 +111,7 @@ def extract_fields(lines: list[OcrLine]) -> tuple[dict, dict, str]:
     # --- 役職 ---
     for line in lines:
         norm = _normalize(line.text)
-        if TITLE_HINT.search(norm):
+        if TITLE_HINT.search(norm) and not COMPANY_HINT.search(norm) and not EMAIL_RE.search(norm) and not URL_RE.search(norm) and not PHONE_RE.search(norm):
             set_field("title", norm, line.confidence)
             break
 
@@ -109,14 +119,34 @@ def extract_fields(lines: list[OcrLine]) -> tuple[dict, dict, str]:
     address_candidates = []
     for line in lines:
         norm = _normalize(line.text)
+        norm = POSTAL_RE.sub("", norm).strip(" 〒,:")
+        prefecture = re.search(r"東京都|北海道|京都府|大阪府|[一-龥]{2,3}県", norm)
+        if prefecture and re.search(r"\d", norm[:prefecture.start()]):
+            # A corrupted postal prefix must not contaminate the street address.
+            norm = norm[prefecture.start():]
+        if COMPANY_HINT.search(norm) or TITLE_HINT.search(norm) or norm == fields.get("company"):
+            continue
         if ADDRESS_HINT.search(norm) and len(norm) >= 8:
             # postal/email/url/phone と被らないように
             if EMAIL_RE.search(norm) or URL_RE.search(norm) or PHONE_RE.search(norm):
                 continue
-            address_candidates.append((norm, line.confidence))
+            address_candidates.append((norm, line.confidence, line))
     if address_candidates:
         # 一番長いものを採用（より具体的）
-        addr, conf = max(address_candidates, key=lambda x: len(x[0]))
+        addr, conf, anchor = max(address_candidates, key=lambda x: len(x[0]))
+        # Join nearby aligned continuation rows (building/floor), never another column.
+        for following in sorted(lines, key=lambda item: item.y_top):
+            gap = following.y_top - anchor.y_bottom
+            value = _normalize(following.text)
+            if not (0 <= gap <= 1.5 * anchor.height and abs(following.x_left - anchor.x_left) <= 2 * anchor.height):
+                continue
+            if not re.search(r"ビル|マンション|タワー|階|\d\s*[FＦ]\b", value):
+                continue
+            if COMPANY_HINT.search(value) or EMAIL_RE.search(value) or URL_RE.search(value) or PHONE_RE.search(value):
+                continue
+            addr += " " + value
+            conf = min(conf, following.confidence)
+            anchor = following
         set_field("address", addr, conf)
 
     # --- 氏名候補：高さ最大かつ短めで、会社/役職/住所/電話/email を含まない行 ---
@@ -125,7 +155,13 @@ def extract_fields(lines: list[OcrLine]) -> tuple[dict, dict, str]:
         scored = []
         for line in lines:
             norm = _normalize(line.text)
-            if norm in used_texts:
+            explicit = re.match(r"^(?:氏名|名前|Name)\s*[:：]\s*(.+)$", norm, re.IGNORECASE)
+            if explicit:
+                set_field("person_name", explicit.group(1), line.confidence)
+                break
+            if norm in used_texts or ADDRESS_HINT.search(norm) and len(norm) >= 8:
+                continue
+            if re.search(r"〒|ビル|マンション|タワー|\d\s*F\b", norm):
                 continue
             if (
                 EMAIL_RE.search(norm)
@@ -137,10 +173,11 @@ def extract_fields(lines: list[OcrLine]) -> tuple[dict, dict, str]:
             if COMPANY_HINT.search(norm) or TITLE_HINT.search(norm):
                 continue
             length = len(norm.replace(" ", "").replace("　", ""))
-            if length < 2 or length > 14:
+            limit = 40 if re.fullmatch(r"[A-Za-zÀ-ÿ.'’\-]+(?:\s+[A-Za-zÀ-ÿ.'’\-]+)+", norm) else 14
+            if length < 2 or length > limit:
                 continue
             scored.append((line.height, line.confidence, norm))
-        if scored:
+        if scored and "person_name" not in fields:
             scored.sort(key=lambda x: (-x[0], -x[1]))
             _, conf, name = scored[0]
             set_field("person_name", name, conf)
