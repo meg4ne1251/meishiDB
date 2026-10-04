@@ -116,6 +116,24 @@ def test_send_exception(tmp_path, monkeypatch):
     assert wm._send(f, api_url="http://api:8000", token="tok") is False
 
 
+def test_send_rejects_symlink_without_reading_target(tmp_path, monkeypatch):
+    target = tmp_path / "private.txt"
+    target.write_bytes(b"private content")
+    image = tmp_path / "card.jpg"
+    image.symlink_to(target)
+    monkeypatch.setattr(wm.httpx, "post", lambda *a, **kw: pytest.fail("symlink sent to API"))
+    assert wm._send(image, api_url="http://api", token="tok") is False
+
+
+def test_send_rejects_nonregular_file_without_blocking(tmp_path, monkeypatch):
+    import os
+
+    image = tmp_path / "card.jpg"
+    os.mkfifo(image)
+    monkeypatch.setattr(wm.httpx, "post", lambda *a, **kw: pytest.fail("FIFO sent to API"))
+    assert wm._send(image, api_url="http://api", token="tok") is False
+
+
 # ----------------------------- Handler -----------------------------
 
 

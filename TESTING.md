@@ -4,12 +4,12 @@
 
 | コンポーネント | フレームワーク | テスト数 | 必要なもの |
 |---|---|---|---|
-| `api/` (FastAPI) | pytest + pytest-asyncio | 211 | **Docker**（テスト用 `postgres:16` を自動起動） |
-| `ocr/` | pytest | 70 (+1 skip) | なし（PaddleOCR は不要・モック） |
-| `scanner-watcher/` | pytest | 19 | なし |
+| `api/` (FastAPI) | pytest + pytest-asyncio | 223 | **Docker**（テスト用 `postgres:16` を自動起動） |
+| `ocr/` | pytest | 72 (+1 skip) | なし（PaddleOCR は不要・モック） |
+| `scanner-watcher/` | pytest | 21 | なし |
 | `web/` (Next.js) | Vitest + jsdom | 39 | Node.js |
 
-合計 **339 テスト**（別途 OCR 実モデルのテスト1件は依存未導入時に skip）。
+合計 **355 テスト**（別途 OCR 実モデルのテスト1件は依存未導入時に skip）。
 
 ---
 
@@ -54,6 +54,10 @@ python3 -m venv .venv
 同時登録・共有・お気に入り、OCR中の手動編集、200件を超える検索、
 画像欠落、vCard改行、タグ色の消去、共有先の編集権限も検証します。
 
+`test_review_followup.py`では画像差し替え中の古いOCR結果・失敗通知の除外、
+確認済み状態の保護、不正な文字の422応答、エラー応答でのパスワード非表示、
+ユーザー検索のワイルドカードを検証します。
+
 MinIO・Meilisearch・OCR サービス・ジオコーダは外部依存なので `monkeypatch` でスタブ化し、
 ルーターの分岐を検証します。
 
@@ -80,7 +84,8 @@ python3 -m venv .venv
 ## scanner-watcher/ — フォルダ監視
 
 ヘルパ（`_content_type_for` / `_wait_until_stable` / `_move` / `_send` / `Handler`）を
-テスト。HTTP 送信は `monkeypatch` でスタブ化します。
+テスト。シンボリックリンクとFIFOが送信されないことも検証します。
+HTTP 送信は `monkeypatch` でスタブ化します。
 
 ```bash
 cd scanner-watcher
@@ -101,7 +106,7 @@ Vitest でテストします。`fetch` はモック。
 `tests/sw.test.ts`はService Workerの実ファイルをVMで実行し、認証データの除外、静的ファイルのキャッシュ、旧キャッシュの削除を検証します。
 
 ```bash
-cd web
+cd web  # Node.js 22.12以上
 npm install
 npm test          # vitest run
 npm run test:watch

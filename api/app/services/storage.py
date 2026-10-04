@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import IO
+from uuid import uuid4
 
 from PIL import Image, ImageOps
 
@@ -32,8 +32,8 @@ def get_client():
         return _client
     if not _is_configured():
         raise RuntimeError("MinIO is not configured")
-    from minio import Minio
     import urllib3
+    from minio import Minio
 
     s = get_settings()
     endpoint = s.minio_endpoint
@@ -90,14 +90,17 @@ def upload_card_image(
 
     s = get_settings()
     ext = _ext_for(content_type)
-    original_key = f"{card_id}/{side}.{ext}"
+    # Each upload is immutable: delayed OCR/readers must refer to the bytes
+    # they started with, and a failed replacement must not show an old thumbnail.
+    image_name = f"{side}-{uuid4().hex}"
+    original_key = f"{card_id}/{image_name}.{ext}"
     _put(s.minio_bucket_original, original_key, content, content_type)
 
     thumb_key: str | None = None
     if side == "front":
         try:
             thumb_bytes = _make_thumbnail(content)
-            thumb_key = f"{card_id}/{side}_512.webp"
+            thumb_key = f"{card_id}/{image_name}_512.webp"
             _put(s.minio_bucket_thumb, thumb_key, thumb_bytes, "image/webp")
         except Exception as e:
             logger.warning("thumbnail generation failed: %s", e)

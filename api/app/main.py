@@ -1,12 +1,15 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import JSONResponse
+
+from app.core.auth_limit import AuthRateLimitMiddleware
 from app.core.body_limit import BodyLimitMiddleware
 from app.core.browser_security import BrowserSecurityMiddleware
-from app.core.auth_limit import AuthRateLimitMiddleware
-from fastapi.middleware.cors import CORSMiddleware
-
 from app.core.config import get_settings
 from app.core.logging import configure_logging, log
 from app.routers import auth, cards, export, scanner, search, tags, users, webauthn
@@ -27,6 +30,13 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="meishiDB API", version="0.1.0", lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request, exc: RequestValidationError):
+        # Never echo passwords or invalid Unicode that JSONResponse cannot encode.
+        return JSONResponse(status_code=422, content={
+            "detail": jsonable_encoder(exc.errors(), exclude={"input"}),
+        })
 
     app.add_middleware(BodyLimitMiddleware)
     app.add_middleware(AuthRateLimitMiddleware)

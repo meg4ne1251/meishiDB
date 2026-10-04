@@ -15,16 +15,16 @@ from fastapi import (
     UploadFile,
     status,
 )
-from starlette.concurrency import run_in_threadpool
 from sqlalchemy import delete, func, or_, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.concurrency import run_in_threadpool
 
 from app.core.db import SessionLocal, get_db
 from app.core.logging import log
 from app.deps import get_current_user
-from app.models.card import Card, CardField, CardMemo, CardShare, CardTag, Favorite, OCR_FIELD_NAMES
+from app.models.card import OCR_FIELD_NAMES, Card, CardField, CardMemo, CardShare, CardTag, Favorite
 from app.models.tag import Tag
 from app.models.user import User
 from app.schemas.card import (
@@ -43,6 +43,7 @@ from app.schemas.card import (
     ShareRequest,
     TagSummary,
 )
+from app.schemas.text import DatabaseText
 from app.services import audit, geocoder, ocr_client, search_index, storage
 from app.services.card_query import apply_search
 from app.services.images import MAX_IMAGE_BYTES, read_image
@@ -171,7 +172,7 @@ async def _ensure_access(
 async def list_cards(
     request: Request,
     scope: Literal["owned", "shared", "all"] = Query("owned"),
-    q: str | None = Query(default=None, max_length=200),
+    q: DatabaseText | None = Query(default=None, max_length=200),
     favorite: bool = Query(default=False),
     tag_id: UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
@@ -452,10 +453,16 @@ async def upload_card_image(
         log.exception("storage.upload_failed", card_id=str(card_id))
         raise HTTPException(status_code=500, detail="storage upload failed")
 
+    # Storage I/O runs outside the transaction lock; reload after it finishes
+    # before publishing this upload or changing its processing status.
+    card, _ = await _ensure_access(db, card_id, user, need_edit=True, lock=True)
     if side == "front":
         card.image_front_key = original_key
-        if run_ocr:
-            card.status = "ocr_running"
+        if card.fields:
+            card.fields.raw_ocr_text = None
+            card.fields.ocr_confidence = None
+        if card.status not in {"confirmed", "archived"}:
+            card.status = "ocr_running" if run_ocr else "uploaded"
     else:
         card.image_back_key = original_key
 
@@ -477,10 +484,19 @@ async def upload_card_image(
             result = await ocr_client.call_ocr_limited(content)
         except Exception as e:
             log.warning("ocr.failed", card_id=str(card.id), error=str(e))
-            card.status = "uploaded"
+            # Do not undo a concurrent confirmation or a newer image's OCR.
+            await db.execute(
+                update(Card).where(
+                    Card.id == card_id, Card.image_front_key == original_key,
+                    Card.status == "ocr_running",
+                ).values(status="uploaded", updated_at=datetime.now(timezone.utc))
+                .execution_options(synchronize_session=False)
+            )
             await db.commit()
+            await db.refresh(card)
         else:
-            await _apply_ocr_result(db, card, result, background_tasks)
+            await _apply_ocr_result(db, card, result, background_tasks,
+                                    expected_front_key=original_key)
 
     summary = await _serialize(db, card, viewer_id=user.id)
     await search_index.upsert_card(card, card.fields)
@@ -533,14 +549,15 @@ async def rerun_ocr(
     if not card.image_front_key:
         raise HTTPException(status_code=400, detail="no front image uploaded")
 
+    front_key = card.image_front_key
     try:
-        data, _ = await run_in_threadpool(storage.get_card_image, card.image_front_key)
+        data, _ = await run_in_threadpool(storage.get_card_image, front_key)
         result = await ocr_client.call_ocr_limited(data)
     except Exception as e:
         log.warning("ocr.rerun_failed", card_id=str(card.id), error=str(e))
         raise HTTPException(status_code=502, detail="ocr failed")
 
-    await _apply_ocr_result(db, card, result, background_tasks)
+    await _apply_ocr_result(db, card, result, background_tasks, expected_front_key=front_key)
     await audit.record(
         db,
         user_id=user.id,
@@ -601,7 +618,10 @@ async def geocode_card(
     return CardDetail(**summary.model_dump())
 
 
-async def _apply_ocr_result(db: AsyncSession, card: Card, result: dict, background_tasks: BackgroundTasks) -> None:
+async def _apply_ocr_result(
+    db: AsyncSession, card: Card, result: dict, background_tasks: BackgroundTasks,
+    *, expected_front_key: str | None = None,
+) -> None:
     """OCR の出力（{fields, confidence, raw_text}）を card_fields に適用。"""
     # Reload after inference, which can take tens of seconds. Serialize with PATCH
     # so OCR only fills fields that are still empty, preserving concurrent edits.
@@ -612,6 +632,11 @@ async def _apply_ocr_result(db: AsyncSession, card: Card, result: dict, backgrou
     if current is None:
         raise HTTPException(status_code=404, detail="card not found")
     card = current
+    if expected_front_key is not None and card.image_front_key != expected_front_key:
+        # A replacement completed while this inference was running.
+        await db.commit()
+        await db.refresh(card)
+        return
     fields = result.get("fields") or {}
     confidence = result.get("confidence") or {}
     raw_text = result.get("raw_text") or ""

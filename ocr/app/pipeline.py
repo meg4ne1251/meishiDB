@@ -157,7 +157,7 @@ def _decode_image(image_bytes: bytes) -> np.ndarray:
     w, h = img.size
     if max(w, h) > max_side:
         scale = max_side / max(w, h)
-        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+        img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
 
     arr = np.array(img)
     return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)

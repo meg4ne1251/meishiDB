@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.deps import get_current_user
 from app.models.user import User
+from app.schemas.text import DatabaseText
 from app.schemas.user import UserSummary
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -12,15 +13,16 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 @router.get("/search", response_model=list[UserSummary])
 async def search_users(
-    q: str = Query(min_length=2, max_length=100),
+    q: DatabaseText = Query(min_length=2, max_length=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[UserSummary]:
     """共有先選択用。display_name もしくは email の前方一致で 10 件まで返す。"""
-    like = f"%{q}%"
+    escaped = q.replace("~", "~~").replace("%", "~%").replace("_", "~_")
+    like = f"%{escaped}%"
     rows = await db.scalars(
         select(User)
-        .where(User.id != user.id, (User.display_name.ilike(like)) | (User.email.ilike(like)))
+        .where(User.id != user.id, (User.display_name.ilike(like, escape="~")) | (User.email.ilike(like, escape="~")))
         .order_by(User.display_name)
         .limit(10)
     )

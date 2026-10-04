@@ -92,6 +92,8 @@ VPN 内ホスト名であれば Caddyfile の該当ホスト指定を `tls inter
 
 ### ローカル直起動
 
+WebはNode.js 22.12以上を使用してください。DockerはNode.js 22を使用します。
+
 ```bash
 # API
 cd api
@@ -187,3 +189,6 @@ API・OCRの受信ボディはmultipart分を含め16 MiBまでです。
 Meilisearch検索は200件ずつ取得し、ページ送り・CSV/vCardにも同じ結果を使います。
 1,000件の上限に到達した場合はPostgreSQLの部分一致検索へ切り替えます。
 その場合はOCR全文も検索しますが、Meilisearchのタイプミス補正は適用されません。
+
+2026-10-04の追加レビュー・修正と依存監査は
+[`docs/review-followup-2026-10-04.md`](docs/review-followup-2026-10-04.md)を参照してください。

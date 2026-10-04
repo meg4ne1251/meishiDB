@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.text import DatabaseText
+
 
 class LoginBeginRequest(BaseModel):
     email: EmailStr | None = None
@@ -14,4 +16,4 @@ class FinishRequest(BaseModel):
 
 
 class RegisterFinishRequest(FinishRequest):
-    nickname: str | None = Field(default=None, max_length=100)
+    nickname: DatabaseText | None = Field(default=None, max_length=100)

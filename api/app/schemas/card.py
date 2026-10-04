@@ -1,24 +1,25 @@
 from datetime import datetime
+from typing import Annotated, Literal
 from uuid import UUID
 
-from typing import Annotated, Literal
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from app.schemas.text import DatabaseText, validate_database_text
 
 
 class CardFieldsBase(BaseModel):
-    person_name: str | None = None
-    person_name_kana: str | None = None
-    company: str | None = None
-    department: str | None = None
-    title: str | None = None
-    postal_code: str | None = None
-    address: str | None = None
-    phone: str | None = None
-    mobile: str | None = None
-    fax: str | None = None
-    email: str | None = None
-    website: str | None = None
+    person_name: DatabaseText | None = None
+    person_name_kana: DatabaseText | None = None
+    company: DatabaseText | None = None
+    department: DatabaseText | None = None
+    title: DatabaseText | None = None
+    postal_code: DatabaseText | None = None
+    address: DatabaseText | None = None
+    phone: DatabaseText | None = None
+    mobile: DatabaseText | None = None
+    fax: DatabaseText | None = None
+    email: DatabaseText | None = None
+    website: DatabaseText | None = None
 
 
 class CardFieldsRead(CardFieldsBase):
@@ -75,7 +76,11 @@ class CardDetail(CardSummary):
 
 
 class MemoWrite(BaseModel):
-    body: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=5000)]
+    body: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=5000),
+        AfterValidator(validate_database_text),
+    ]
 
 
 class MemoRead(BaseModel):
@@ -109,7 +114,7 @@ class CardGeoResponse(BaseModel):
 
 
 class ShareRequest(BaseModel):
-    user_email: str
+    user_email: DatabaseText
     permission: str = Field(default="view", pattern="^(view|edit)$")
 
 

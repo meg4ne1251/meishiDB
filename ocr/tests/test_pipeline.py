@@ -197,3 +197,12 @@ def test_english_contact_cannot_change_phone_digits(monkeypatch):
     monkeypatch.setattr('app.pipeline._get_english_ocr', lambda: Recognizer())
     original = fragment('TEL:03-1234-5678', 5, 5)
     assert _reread_contacts([original], np.zeros((50,200,3),dtype=np.uint8)) == [original]
+
+
+@pytest.mark.parametrize("size", [(1, 10000), (10000, 1)])
+def test_decode_narrow_image_keeps_nonzero_dimensions(size):
+    image = io.BytesIO()
+    Image.new("RGB", size, "white").save(image, format="PNG")
+    decoded = _decode_image(image.getvalue())
+    assert min(decoded.shape[:2]) == 1
+    assert max(decoded.shape[:2]) == 2200

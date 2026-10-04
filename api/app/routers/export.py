@@ -20,6 +20,7 @@ from app.core.db import get_db
 from app.deps import get_current_user
 from app.models.card import Card, CardField, CardShare, CardTag, Favorite
 from app.models.user import User
+from app.schemas.text import DatabaseText
 from app.services import audit
 from app.services.card_query import apply_search
 
@@ -182,7 +183,7 @@ async def export_cards(
     request: Request,
     format: Literal["csv", "vcard"] = Query("csv"),
     scope: Literal["owned", "shared", "all"] = Query("owned"),
-    q: str | None = Query(None, max_length=200),
+    q: DatabaseText | None = Query(None, max_length=200),
     favorite: bool = Query(False),
     tag_id: UUID | None = Query(None),
     ids: list[UUID] | None = Query(None),

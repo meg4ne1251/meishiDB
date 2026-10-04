@@ -19,9 +19,10 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import stat
 import time
 from pathlib import Path
-from queue import Queue, Empty
+from queue import Empty, Queue
 from threading import Thread
 from uuid import uuid4
 
@@ -122,7 +123,21 @@ def _move_with_retry(path: Path, target_dir: str | None) -> None:
 def _send(path: Path, *, api_url: str, token: str) -> bool:
     url = api_url.rstrip("/") + "/api/scanner/import"
     try:
-        with path.open("rb") as fh:
+        # Open without following a final symlink; nonblocking open also lets
+        # us reject FIFOs before a read can hang the only scanner worker.
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode):
+            log.warning("skipping nonregular scan file: %s", path)
+            return False
+        flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as fh:
+            opened = os.fstat(fh.fileno())
+            if (not stat.S_ISREG(opened.st_mode)
+                or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)):
+                log.warning("scan file changed before opening: %s", path)
+                return False
             files = {"image": (path.name, fh, _content_type_for(path))}
             resp = httpx.post(
                 url,
