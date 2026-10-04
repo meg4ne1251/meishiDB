@@ -14,8 +14,10 @@ from .pipeline import OcrLine
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 URL_RE = re.compile(r"\b(?:https?://|www\.)[A-Za-z0-9./_\-?=&%#]+", re.IGNORECASE)
-POSTAL_RE = re.compile(r"〒?\s?(\d{3})-?(\d{4})")
-PHONE_RE = re.compile(r"(?:\+?81[-\s]?|0)\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}")
+POSTAL_RE = re.compile(r"(?<![\d-])〒?\s?(\d{3})-?(\d{4})(?![\d-])")
+PHONE_RE = re.compile(
+    r"(?<![\d-])(?:\+?81[-\s]?(?:\d[-\s]?){8,9}\d|0(?:\d[-\s]?){8,9}\d)(?![\d-])"
+)
 MOBILE_PREFIX = ("070", "080", "090")
 FAX_HINT = re.compile(r"(?:FAX|Fax|fax|ＦＡＸ)", re.IGNORECASE)
 TEL_HINT = re.compile(r"(?:TEL|Tel|tel|ＴＥＬ|電話)", re.IGNORECASE)
@@ -78,7 +80,8 @@ def extract_fields(lines: list[OcrLine]) -> tuple[dict, dict, str]:
                 set_field("website", url, line.confidence)
 
         # postal
-        m = POSTAL_RE.search(norm)
+        # 電話番号の一部を郵便番号として拾わない。
+        m = POSTAL_RE.search(PHONE_RE.sub(" ", norm))
         if m:
             set_field("postal_code", f"{m.group(1)}-{m.group(2)}", line.confidence)
 

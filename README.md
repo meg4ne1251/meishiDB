@@ -10,7 +10,7 @@
 |---|---|---|
 | `web` | Next.js 15 / PWA / shadcn/ui | 3000 |
 | `api` | FastAPI / 認証 / CRUD / 監査 | 8000 |
-| `ocr` | PaddleOCR (PP-OCRv4 server, CPU) | 8001 |
+| `ocr` | PaddleOCR（日本語＋英語、CPU） | 8001 |
 | `db` | PostgreSQL 16 | 5432 |
 | `search` | Meilisearch v1.10 | 7700 |
 | `storage` | MinIO（名刺画像） | 9000 / 9001 |
@@ -29,6 +29,7 @@
   - **メモ**: 名刺詳細で追加・編集・削除（最大5000文字）。投稿者・作成日時を表示。共有先も閲覧でき、編集権限の共有先は自分のメモを編集・削除、名刺所有者は全メモを管理できる
   - **画像アップロード**（front/back）→ サムネ自動生成（front, 512px WebP）
   - **OCR**: front 画像アップロード時に同期実行、フィールド自動入力
+    - 同じ行の氏名・役職の分割領域を結合し、メールらしい英数字領域は英語モデルで再認識
   - **検索**: Meilisearch（未配線時は Postgres ILIKE フォールバック）
   - **地図** (`/map`): MapLibre GL JS + OSM タイルで住所を地図表示。住所のジオコーディングは自前 Nominatim（任意・`--profile geocoder`）。未設定でも座標を持つ名刺は表示する
   - **エクスポート**: CSV / vCard 3.0
@@ -41,6 +42,15 @@
 ## 開発環境
 
 ### Docker Compose（推奨）
+
+OCRを使うx86_64環境では、CPUにAVX命令セットが必要です。仮想マシンではCPUタイプを
+`host`などAVXを公開する設定にしてください。`lscpu`のFlagsで確認できます。
+初回のイメージビルドにはディスク容量が必要なため、テスト用VMも40 GB以上を推奨します。
+
+MinIOは公式コンテナイメージが取得できなくなったため、
+[`deploy/minio/Dockerfile`](deploy/minio/Dockerfile)で公式ソースの
+`RELEASE.2025-10-15T17-29-55Z`をビルドします。初回はGo依存の取得とコンパイルが走ります。
+手順の根拠は[MinIO公式リリース](https://github.com/minio/minio/releases/tag/RELEASE.2025-10-15T17-29-55Z)です。
 
 ```bash
 cp deploy/env.example deploy/.env  # SECRET_KEY などを編集
@@ -62,6 +72,9 @@ docker compose up --build
 最初に http://localhost:3000/register からアカウント作成。最初のユーザーは admin になる。
 
 > PaddleOCR の初回ビルドは CPU/ネットワーク次第で数分〜10 分以上かかる。`docker compose up ocr` だけ先に走らせておくとよい。
+
+OCRモデルは`ocr_models`ボリュームに保存し、コンテナ更新時にも再利用します。
+日本語モデルは起動時、メール再認識用の英語モデルは初回の対象画像処理時に取得します。
 
 ### スキャナ連携を使う
 

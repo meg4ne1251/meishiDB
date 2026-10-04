@@ -5,7 +5,7 @@
 | コンポーネント | フレームワーク | テスト数 | 必要なもの |
 |---|---|---|---|
 | `api/` (FastAPI) | pytest + pytest-asyncio | 182 | **Docker**（テスト用 `postgres:16` を自動起動） |
-| `ocr/` | pytest | 26 (+1 skip) | なし（PaddleOCR は不要・モック） |
+| `ocr/` | pytest | 46 (+1 skip) | なし（PaddleOCR は不要・モック） |
 | `scanner-watcher/` | pytest | 19 | なし |
 | `web/` (Next.js) | Vitest + jsdom | 34 | Node.js |
 
@@ -39,7 +39,7 @@ python3 -m venv .venv
 
 - Docker が無い環境では API スイートは自動的に **skip** されます。
 - 既に `127.0.0.1:54330` で Postgres が動いている場合（CI で外部 DB を当てる等）は、
-  コンテナを起動せずその DB を `meishi_test` データベースとして使います。
+  Dockerへのアクセスなしで、その Postgres の `meishi_test` データベースを使います。
   別ポートを使いたいときは `MEISHI_TEST_PG_PORT` を設定してください。
 
 ### カバー範囲

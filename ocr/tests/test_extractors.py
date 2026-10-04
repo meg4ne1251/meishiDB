@@ -1,5 +1,7 @@
 """名刺フィールド抽出（正規表現＋位置ヒューリスティクス）。"""
 
+import pytest
+
 from app.extractors import _classify_phone, _normalize, extract_fields
 from app.pipeline import OcrLine
 
@@ -70,6 +72,28 @@ def test_extract_phone_mobile_fax_separately():
     assert fields["phone"] == "03-1234-5678"
     assert fields["fax"] == "03-1234-9999"
     assert fields["mobile"] == "090-1111-2222"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "TEL 03-1234-5678",
+        "09012345678",
+        "011 1234567",
+        "+81-3-1234-5678",
+        "ＦＡＸ ０３－１２３４－５６７８",
+    ],
+)
+def test_phone_is_not_extracted_as_postal_code(text):
+    fields, _, _ = extract_fields([line(text)])
+    assert "postal_code" not in fields
+    assert any(key in fields for key in ("phone", "mobile", "fax"))
+
+
+def test_postal_code_and_phone_on_same_line():
+    fields, _, _ = extract_fields([line("〒100-0001 TEL 03-1234-5678")])
+    assert fields["postal_code"] == "100-0001"
+    assert fields["phone"] == "03-1234-5678"
 
 
 def test_extract_company():

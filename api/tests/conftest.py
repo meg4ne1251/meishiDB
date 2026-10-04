@@ -127,11 +127,12 @@ def _wait_ready(timeout: float = 60.0) -> None:
 @pytest.fixture(scope="session", autouse=True)
 def _database():
     """セッション全体で 1 つの Postgres を用意し、スキーマを作る。"""
-    if not _docker_available():
+    external_pg = _port_in_use(_PG_PORT)
+    if not external_pg and not _docker_available():
         pytest.skip("Docker is required for the API test suite (postgres:16)")
 
     started_here = False
-    if not _port_in_use(_PG_PORT):
+    if not external_pg:
         _start_container()
         started_here = True
         _wait_ready()

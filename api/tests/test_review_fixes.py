@@ -74,7 +74,8 @@ async def test_content_update_preserves_index_shares(monkeypatch):
     doc = {"id": "card", "shared_with": ["recipient"]}
 
     class Index:
-        async def update_documents(self, documents):
+        async def update_documents(self, documents, primary_key=None):
+            assert primary_key == "id"
             doc.update(documents[0])
 
         async def add_documents(self, documents):

@@ -101,7 +101,7 @@ async def upsert_card(card: Card, fields: CardField | None) -> None:
         client = _get_async_client()
         if client is None:
             return
-        await client.index(_INDEX).update_documents([_doc_for_card(card, fields)])
+        await client.index(_INDEX).update_documents([_doc_for_card(card, fields)], primary_key="id")
     except Exception as e:
         logger.warning("meili upsert failed (%s): %s", card.id, e)
 
@@ -120,7 +120,8 @@ async def update_shares(card_id: UUID, shared_with_ids: list[UUID]) -> None:
                     "id": str(card_id),
                     "shared_with": [str(u) for u in shared_with_ids],
                 }
-            ]
+            ],
+            primary_key="id",
         )
     except Exception as e:
         logger.warning("meili shares update failed (%s): %s", card_id, e)
@@ -183,5 +184,5 @@ async def reindex_all(db: AsyncSession) -> int:
         d["shared_with"] = share_map.get(d["id"], [])
 
     if docs:
-        await client.index(_INDEX).add_documents(docs)
+        await client.index(_INDEX).add_documents(docs, primary_key="id")
     return len(docs)
