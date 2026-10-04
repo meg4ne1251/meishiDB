@@ -27,8 +27,8 @@ from app.core.db import get_db
 from app.core.logging import log
 from app.models.card import Card, CardField
 from app.models.user import User
-from app.routers.cards import _apply_ocr_result
-from app.schemas.card import CardDetail, CardFieldsRead
+from app.routers.cards import _apply_ocr_result, _reset_failed_ocr, _serialize
+from app.schemas.card import CardDetail
 from app.services import audit, ocr_client, search_index, storage
 from app.services.images import read_image
 
@@ -94,30 +94,13 @@ async def import_scanned(
 
     try:
         result = await ocr_client.call_ocr_limited(content)
-        await _apply_ocr_result(db, card, result, background_tasks,
-                                expected_front_key=original_key)
     except Exception as e:
         log.warning("scanner.ocr_failed", card_id=str(card.id), error=str(e))
-        card.status = "uploaded"
-        await db.commit()
+        card = await _reset_failed_ocr(db, card.id, original_key)
+    else:
+        await _apply_ocr_result(db, card, result, background_tasks,
+                                expected_front_key=original_key)
 
-    # 直前の db.refresh(card) で field が expire され得るので、シリアライズ前に読み直す。
-    await db.refresh(field)
-
-    await search_index.upsert_card(card, field)
-
-    return CardDetail(
-        id=card.id,
-        owner_id=card.owner_id,
-        status=card.status,
-        source=card.source,
-        image_front_key=card.image_front_key,
-        image_back_key=card.image_back_key,
-        created_at=card.created_at,
-        updated_at=card.updated_at,
-        fields=CardFieldsRead.model_validate(field),
-        tags=[],
-        is_favorite=False,
-        shared=False,
-        can_edit=True,
-    )
+    summary = await _serialize(db, card, viewer_id=owner.id)
+    await search_index.upsert_card(card, card.fields)
+    return CardDetail(**summary.model_dump())

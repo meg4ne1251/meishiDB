@@ -117,3 +117,70 @@ async def test_scanner_ocr_failure_sets_uploaded(
     )
     assert r.status_code == 200
     assert r.json()["status"] == "uploaded"
+
+
+@pytest.mark.parametrize("fails", [False, True])
+@pytest.mark.parametrize("change", ["confirmed", "replacement", "deleted"])
+async def test_scanner_ocr_failure_preserves_concurrent_changes(
+    client, make_user, scanner_config, storage_stub, monkeypatch, change, fails
+):
+    owner, _ = await make_user(email=OWNER_EMAIL)
+    card_id = None
+
+    async def fail_after_change(content):
+        nonlocal card_id
+        cards = (await owner.get("/api/cards")).json()["items"]
+        card_id = cards[0]["id"]
+        path = f"/api/cards/{card_id}"
+        if change == "confirmed":
+            response = await owner.patch(path, json={"status": "confirmed"})
+        elif change == "replacement":
+            monkeypatch.setattr("app.services.storage.upload_card_image",
+                                lambda *args: ("replacement.jpg", None))
+            response = await owner.post(f"{path}/image", data={"run_ocr": "false"},
+                files={"image": ("new.jpg", b"new", "image/jpeg")})
+            assert response.status_code == 200
+            response = await owner.patch(path, json={"status": "ocr_done"})
+        else:
+            monkeypatch.setattr("app.services.storage.delete_card_images", lambda *_: None)
+            response = await owner.delete(path)
+        assert response.status_code in {200, 204}
+        if fails:
+            raise RuntimeError("old OCR failed")
+        return {"fields": {"company": "Old company"}, "raw_text": "Old text"}
+
+    monkeypatch.setattr("app.services.ocr_client.call_ocr", fail_after_change)
+    response = await client.post("/api/scanner/import",
+        files={"image": ("c.jpg", b"image", "image/jpeg")},
+        headers={"X-Scanner-Token": TOKEN})
+    current = await owner.get(f"/api/cards/{card_id}")
+    if change == "deleted":
+        assert response.status_code == 404
+        assert current.status_code == 404
+    else:
+        assert response.status_code == 200
+        expected = "confirmed" if change == "confirmed" else "ocr_done"
+        assert response.json()["status"] == expected
+        assert current.json()["status"] == expected
+        if change == "replacement":
+            assert response.json()["image_front_key"] == "replacement.jpg"
+            assert current.json()["fields"]["company"] is None
+
+
+async def test_scanner_invalid_ocr_keeps_saved_card(
+    client, make_user, scanner_config, storage_stub, monkeypatch
+):
+    owner, _ = await make_user(email=OWNER_EMAIL)
+
+    async def invalid(_):
+        return {"fields": {"company": "bad\x00text"}}
+
+    monkeypatch.setattr("app.services.ocr_client.call_ocr", invalid)
+    response = await client.post("/api/scanner/import",
+        files={"image": ("c.jpg", b"image", "image/jpeg")},
+        headers={"X-Scanner-Token": TOKEN})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "uploaded"
+    assert body["fields"]["company"] is None
+    assert (await owner.get(f"/api/cards/{body['id']}")).status_code == 200

@@ -192,3 +192,5 @@ Meilisearch検索は200件ずつ取得し、ページ送り・CSV/vCardにも同
 
 2026-10-04の追加レビュー・修正と依存監査は
 [`docs/review-followup-2026-10-04.md`](docs/review-followup-2026-10-04.md)を参照してください。
+その後の再レビュー、スキャナ/OCRの追加修正、ローカル依存の再監査は
+[`docs/review-final-2026-10-04.md`](docs/review-final-2026-10-04.md)を参照してください。

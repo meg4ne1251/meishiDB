@@ -226,3 +226,29 @@ async def test_rerun_ocr_success(make_user, storage_stub, ocr_stub):
     assert r.status_code == 200
     assert r.json()["status"] == "ocr_done"
     assert r.json()["fields"]["person_name"] == "OCR太郎"
+
+
+@pytest.mark.parametrize("result", [
+    {"fields": {"company": "bad\x00text"}},
+    {"fields": {"company": ["invalid"]}},
+    {"fields": {}, "raw_text": "bad\x00text"},
+    {"fields": {}, "confidence": {"company": float("nan")}},
+])
+async def test_invalid_ocr_result_keeps_upload_usable(make_user, storage_stub, monkeypatch, result):
+    async def infer(_):
+        return result
+
+    monkeypatch.setattr("app.services.ocr_client.call_ocr", infer)
+    client, _ = await make_user()
+    card = await _create_card(client, person_name="Manual name")
+    path = f"/api/cards/{card['id']}"
+    response = await client.post(f"{path}/image",
+        files={"image": ("card.jpg", b"image", "image/jpeg")})
+    assert response.status_code == 200
+    assert response.json()["status"] == "uploaded"
+    current = (await client.get(path)).json()
+    assert current["fields"]["person_name"] == "Manual name"
+    assert current["fields"]["company"] is None
+    assert current["fields"]["raw_ocr_text"] is None
+    retry = await client.post(f"{path}/ocr")
+    assert retry.status_code == 502

@@ -484,16 +484,7 @@ async def upload_card_image(
             result = await ocr_client.call_ocr_limited(content)
         except Exception as e:
             log.warning("ocr.failed", card_id=str(card.id), error=str(e))
-            # Do not undo a concurrent confirmation or a newer image's OCR.
-            await db.execute(
-                update(Card).where(
-                    Card.id == card_id, Card.image_front_key == original_key,
-                    Card.status == "ocr_running",
-                ).values(status="uploaded", updated_at=datetime.now(timezone.utc))
-                .execution_options(synchronize_session=False)
-            )
-            await db.commit()
-            await db.refresh(card)
+            card = await _reset_failed_ocr(db, card_id, original_key)
         else:
             await _apply_ocr_result(db, card, result, background_tasks,
                                     expected_front_key=original_key)
@@ -616,6 +607,25 @@ async def geocode_card(
 
     summary = await _serialize(db, card, viewer_id=user.id, shared=shared)
     return CardDetail(**summary.model_dump())
+
+
+async def _reset_failed_ocr(db: AsyncSession, card_id: UUID, front_key: str) -> Card:
+    """Reset only the failed image's pending status, then return current DB state."""
+    await db.execute(
+        update(Card).where(
+            Card.id == card_id, Card.image_front_key == front_key,
+            Card.status == "ocr_running",
+        ).values(status="uploaded", updated_at=datetime.now(timezone.utc))
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+    card = await db.scalar(
+        select(Card).where(Card.id == card_id).options(selectinload(Card.fields))
+        .execution_options(populate_existing=True)
+    )
+    if card is None:
+        raise HTTPException(status_code=404, detail="card not found")
+    return card
 
 
 async def _apply_ocr_result(

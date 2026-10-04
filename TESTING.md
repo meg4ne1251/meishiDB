@@ -4,12 +4,12 @@
 
 | コンポーネント | フレームワーク | テスト数 | 必要なもの |
 |---|---|---|---|
-| `api/` (FastAPI) | pytest + pytest-asyncio | 223 | **Docker**（テスト用 `postgres:16` を自動起動） |
+| `api/` (FastAPI) | pytest + pytest-asyncio | 235 | **Docker**（テスト用 `postgres:16` を自動起動） |
 | `ocr/` | pytest | 72 (+1 skip) | なし（PaddleOCR は不要・モック） |
 | `scanner-watcher/` | pytest | 21 | なし |
 | `web/` (Next.js) | Vitest + jsdom | 39 | Node.js |
 
-合計 **355 テスト**（別途 OCR 実モデルのテスト1件は依存未導入時に skip）。
+合計 **367 テスト**（別途 OCR 実モデルのテスト1件は依存未導入時に skip）。
 
 ---
 
@@ -57,6 +57,9 @@ python3 -m venv .venv
 `test_review_followup.py`では画像差し替え中の古いOCR結果・失敗通知の除外、
 確認済み状態の保護、不正な文字の422応答、エラー応答でのパスワード非表示、
 ユーザー検索のワイルドカードを検証します。
+
+追加レビューでは、スキャナOCR中の確認・画像差し替え・削除、OCR応答の不正な文字列・型・信頼度、
+エラーログへ名刺情報を含めないことも検証します。
 
 MinIO・Meilisearch・OCR サービス・ジオコーダは外部依存なので `monkeypatch` でスタブ化し、
 ルーターの分岐を検証します。

@@ -1,0 +1,567 @@
+{
+  "date": "2026-10-04",
+  "python_scope": "api/.venv; API, OCR lightweight tests, scanner tests; PaddleOCR/PaddlePaddle not installed",
+  "method": "Installed package versions queried against https://pypi.org/pypi/{name}/{version}/json vulnerabilities; advisories may include duplicate aliases",
+  "before_affected": [
+    {
+      "name": "anyio",
+      "version": "4.13.0",
+      "advisories": [
+        "GHSA-82r6-8w77-94w6",
+        "GHSA-5p39-cfhj-2xmp",
+        "PYSEC-2026-4025",
+        "PYSEC-2026-4024"
+      ]
+    },
+    {
+      "name": "cryptography",
+      "version": "48.0.0",
+      "advisories": [
+        "GHSA-537c-gmf6-5ccf",
+        "GHSA-m2h6-j472-rp4c",
+        "GHSA-g6cj-pr64-35w5",
+        "GHSA-jwv3-5hgf-82ww",
+        "PYSEC-2026-3552",
+        "PYSEC-2026-3553",
+        "PYSEC-2026-3554"
+      ]
+    },
+    {
+      "name": "h2",
+      "version": "4.3.0",
+      "advisories": [
+        "GHSA-6hr6-w5qg-qmwg",
+        "PYSEC-2026-3628"
+      ]
+    },
+    {
+      "name": "hpack",
+      "version": "4.1.0",
+      "advisories": [
+        "GHSA-8v8h-hg4w-mvq2",
+        "PYSEC-2026-4053"
+      ]
+    },
+    {
+      "name": "httpcore2",
+      "version": "2.2.0",
+      "advisories": [
+        "GHSA-7mj9-2mp8-4m2p",
+        "PYSEC-2026-3844"
+      ]
+    },
+    {
+      "name": "httpx2",
+      "version": "2.2.0",
+      "advisories": [
+        "GHSA-h4x7-gw46-3wm6",
+        "GHSA-pf96-p4fj-6566",
+        "GHSA-8xx6-hgc6-gc2m",
+        "PYSEC-2026-3849",
+        "PYSEC-2026-3848",
+        "PYSEC-2026-3846"
+      ]
+    },
+    {
+      "name": "pillow",
+      "version": "12.2.0",
+      "advisories": [
+        "PYSEC-2026-2253",
+        "PYSEC-2026-2255",
+        "PYSEC-2026-2257",
+        "PYSEC-2026-2256",
+        "PYSEC-2026-2254",
+        "PYSEC-2026-3453",
+        "PYSEC-2026-3451",
+        "PYSEC-2026-3452",
+        "GHSA-62p4-gmf7-7g93",
+        "GHSA-5x94-69rx-g8h2",
+        "GHSA-8v84-f9pq-wr9x",
+        "GHSA-phj9-mv4w-65pm",
+        "GHSA-45hq-cxwh-f6vc",
+        "GHSA-xj96-63gp-2gmr",
+        "GHSA-6r8x-57c9-28j4",
+        "GHSA-fj7v-r99m-22gq",
+        "GHSA-pg7v-jwj7-p798",
+        "GHSA-jjj6-mw9f-p565",
+        "GHSA-vjc4-5qp5-m44j",
+        "GHSA-9hw9-ch79-4vh6",
+        "PYSEC-2026-3454",
+        "PYSEC-2026-3495",
+        "PYSEC-2026-3496",
+        "PYSEC-2026-3494",
+        "PYSEC-2026-3493"
+      ]
+    },
+    {
+      "name": "pip",
+      "version": "26.1.1",
+      "advisories": [
+        "PYSEC-2026-196",
+        "GHSA-wf93-45jw-7689",
+        "PYSEC-2026-3721",
+        "GHSA-qwm4-qh6w-59xr"
+      ]
+    },
+    {
+      "name": "pyasn1",
+      "version": "0.6.3",
+      "advisories": [
+        "GHSA-8ppf-4f7h-5ppj",
+        "GHSA-hm4w-wwcw-mr6r",
+        "PYSEC-2026-3456",
+        "PYSEC-2026-3457",
+        "PYSEC-2026-3455",
+        "GHSA-m4p7-r5rc-7g4j"
+      ]
+    },
+    {
+      "name": "pydantic-settings",
+      "version": "2.14.1",
+      "advisories": [
+        "GHSA-4xgf-cpjx-pc3j"
+      ]
+    },
+    {
+      "name": "PyJWT",
+      "version": "2.13.0",
+      "advisories": [
+        "GHSA-w6j9-cwv2-h6wq",
+        "GHSA-2gx3-rcp4-g85q",
+        "GHSA-w2cx-738m-mc7w",
+        "GHSA-hxm8-2xgr-2p9m",
+        "GHSA-9v7f-9g4p-ffgj",
+        "GHSA-ffc3-869f-jxw9",
+        "GHSA-r6x4-923q-g947",
+        "GHSA-p4g4-x82p-q773",
+        "GHSA-8wjv-2p76-3863",
+        "GHSA-9j54-fg26-wv3r",
+        "GHSA-jwrc-g2q2-pq5p",
+        "GHSA-42vr-xj54-vc7v",
+        "GHSA-gvp8-978c-rx2q",
+        "PYSEC-2026-4145",
+        "PYSEC-2026-4146",
+        "PYSEC-2026-4149",
+        "PYSEC-2026-4152",
+        "PYSEC-2026-4144",
+        "PYSEC-2026-4143",
+        "PYSEC-2026-4148",
+        "PYSEC-2026-4140",
+        "PYSEC-2026-4141",
+        "PYSEC-2026-4147",
+        "PYSEC-2026-4151",
+        "PYSEC-2026-4150",
+        "PYSEC-2026-4142"
+      ]
+    },
+    {
+      "name": "python-multipart",
+      "version": "0.0.29",
+      "advisories": [
+        "GHSA-v9pg-7xvm-68hf",
+        "GHSA-5rvq-cxj2-64vf",
+        "GHSA-6jv3-5f52-599m",
+        "PYSEC-2026-3037",
+        "PYSEC-2026-3036",
+        "PYSEC-2026-3040"
+      ]
+    },
+    {
+      "name": "starlette",
+      "version": "1.1.0",
+      "advisories": [
+        "GHSA-82w8-qh3p-5jfq",
+        "GHSA-jp82-jpqv-5vv3",
+        "PYSEC-2026-249",
+        "PYSEC-2026-248"
+      ]
+    },
+    {
+      "name": "urllib3",
+      "version": "2.7.0",
+      "advisories": [
+        "GHSA-8988-9cw3-xx77",
+        "GHSA-gh4c-6fx4-qh6g",
+        "GHSA-vxq7-64xx-v4gw",
+        "PYSEC-2026-4177",
+        "PYSEC-2026-4176",
+        "PYSEC-2026-4175"
+      ]
+    }
+  ],
+  "after": [
+    {
+      "name": "aiofiles",
+      "version": "25.1.0",
+      "advisories": []
+    },
+    {
+      "name": "alembic",
+      "version": "1.18.4",
+      "advisories": []
+    },
+    {
+      "name": "annotated-doc",
+      "version": "0.0.4",
+      "advisories": []
+    },
+    {
+      "name": "annotated-types",
+      "version": "0.7.0",
+      "advisories": []
+    },
+    {
+      "name": "anyio",
+      "version": "4.15.1",
+      "advisories": []
+    },
+    {
+      "name": "argon2-cffi",
+      "version": "25.1.0",
+      "advisories": []
+    },
+    {
+      "name": "argon2-cffi-bindings",
+      "version": "25.1.0",
+      "advisories": []
+    },
+    {
+      "name": "asyncpg",
+      "version": "0.31.0",
+      "advisories": []
+    },
+    {
+      "name": "camel-converter",
+      "version": "5.1.0",
+      "advisories": []
+    },
+    {
+      "name": "cbor2",
+      "version": "6.1.1",
+      "advisories": []
+    },
+    {
+      "name": "certifi",
+      "version": "2026.5.20",
+      "advisories": []
+    },
+    {
+      "name": "cffi",
+      "version": "2.0.0",
+      "advisories": []
+    },
+    {
+      "name": "click",
+      "version": "8.4.1",
+      "advisories": []
+    },
+    {
+      "name": "cryptography",
+      "version": "50.0.2",
+      "advisories": []
+    },
+    {
+      "name": "dnspython",
+      "version": "2.8.0",
+      "advisories": []
+    },
+    {
+      "name": "email-validator",
+      "version": "2.3.0",
+      "advisories": []
+    },
+    {
+      "name": "fastapi",
+      "version": "0.136.3",
+      "advisories": []
+    },
+    {
+      "name": "greenlet",
+      "version": "3.5.1",
+      "advisories": []
+    },
+    {
+      "name": "gunicorn",
+      "version": "26.0.0",
+      "advisories": []
+    },
+    {
+      "name": "h11",
+      "version": "0.16.0",
+      "advisories": []
+    },
+    {
+      "name": "h2",
+      "version": "4.4.1",
+      "advisories": []
+    },
+    {
+      "name": "hpack",
+      "version": "4.2.0",
+      "advisories": []
+    },
+    {
+      "name": "httpcore",
+      "version": "1.0.9",
+      "advisories": []
+    },
+    {
+      "name": "httpcore2",
+      "version": "2.13.1",
+      "advisories": []
+    },
+    {
+      "name": "httptools",
+      "version": "0.8.0",
+      "advisories": []
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "advisories": []
+    },
+    {
+      "name": "httpx2",
+      "version": "2.13.1",
+      "advisories": []
+    },
+    {
+      "name": "hyperframe",
+      "version": "6.1.0",
+      "advisories": []
+    },
+    {
+      "name": "idna",
+      "version": "3.20",
+      "advisories": []
+    },
+    {
+      "name": "iniconfig",
+      "version": "2.3.0",
+      "advisories": []
+    },
+    {
+      "name": "itsdangerous",
+      "version": "2.2.0",
+      "advisories": []
+    },
+    {
+      "name": "Mako",
+      "version": "1.3.12",
+      "advisories": []
+    },
+    {
+      "name": "MarkupSafe",
+      "version": "3.0.3",
+      "advisories": []
+    },
+    {
+      "name": "meilisearch-python-sdk",
+      "version": "7.1.5",
+      "advisories": []
+    },
+    {
+      "name": "meishidb-api",
+      "version": "0.1.0",
+      "local_project": true
+    },
+    {
+      "name": "minio",
+      "version": "7.2.20",
+      "advisories": []
+    },
+    {
+      "name": "numpy",
+      "version": "2.4.6",
+      "advisories": []
+    },
+    {
+      "name": "opencv-python-headless",
+      "version": "4.13.0.92",
+      "advisories": []
+    },
+    {
+      "name": "packaging",
+      "version": "26.2",
+      "advisories": []
+    },
+    {
+      "name": "passlib",
+      "version": "1.7.4",
+      "advisories": []
+    },
+    {
+      "name": "pillow",
+      "version": "12.3.0",
+      "advisories": []
+    },
+    {
+      "name": "pip",
+      "version": "26.2.1",
+      "advisories": []
+    },
+    {
+      "name": "pluggy",
+      "version": "1.6.0",
+      "advisories": []
+    },
+    {
+      "name": "pyasn1",
+      "version": "0.6.4",
+      "advisories": []
+    },
+    {
+      "name": "pycparser",
+      "version": "3.0",
+      "advisories": []
+    },
+    {
+      "name": "pycryptodome",
+      "version": "3.23.0",
+      "advisories": []
+    },
+    {
+      "name": "pydantic",
+      "version": "2.13.4",
+      "advisories": []
+    },
+    {
+      "name": "pydantic-settings",
+      "version": "2.15.0",
+      "advisories": []
+    },
+    {
+      "name": "pydantic_core",
+      "version": "2.46.4",
+      "advisories": []
+    },
+    {
+      "name": "Pygments",
+      "version": "2.20.0",
+      "advisories": []
+    },
+    {
+      "name": "PyJWT",
+      "version": "2.15.1",
+      "advisories": []
+    },
+    {
+      "name": "pyOpenSSL",
+      "version": "26.4.0",
+      "advisories": []
+    },
+    {
+      "name": "pytest",
+      "version": "9.0.3",
+      "advisories": []
+    },
+    {
+      "name": "pytest-asyncio",
+      "version": "1.4.0",
+      "advisories": []
+    },
+    {
+      "name": "python-dotenv",
+      "version": "1.2.2",
+      "advisories": []
+    },
+    {
+      "name": "python-multipart",
+      "version": "0.0.32",
+      "advisories": []
+    },
+    {
+      "name": "PyYAML",
+      "version": "6.0.3",
+      "advisories": []
+    },
+    {
+      "name": "ruff",
+      "version": "0.15.14",
+      "advisories": []
+    },
+    {
+      "name": "SQLAlchemy",
+      "version": "2.0.50",
+      "advisories": []
+    },
+    {
+      "name": "starlette",
+      "version": "1.7.0",
+      "advisories": []
+    },
+    {
+      "name": "structlog",
+      "version": "25.5.0",
+      "advisories": []
+    },
+    {
+      "name": "truststore",
+      "version": "0.10.4",
+      "advisories": []
+    },
+    {
+      "name": "typing-inspection",
+      "version": "0.4.2",
+      "advisories": []
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.16.0",
+      "advisories": []
+    },
+    {
+      "name": "urllib3",
+      "version": "2.8.0",
+      "advisories": []
+    },
+    {
+      "name": "uvicorn",
+      "version": "0.48.0",
+      "advisories": []
+    },
+    {
+      "name": "uvloop",
+      "version": "0.22.1",
+      "advisories": []
+    },
+    {
+      "name": "watchdog",
+      "version": "6.0.0",
+      "advisories": []
+    },
+    {
+      "name": "watchfiles",
+      "version": "1.2.0",
+      "advisories": []
+    },
+    {
+      "name": "webauthn",
+      "version": "2.7.1",
+      "advisories": []
+    },
+    {
+      "name": "websockets",
+      "version": "16.0",
+      "advisories": []
+    }
+  ],
+  "web_production": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "dependencies": {
+      "prod": 102,
+      "dev": 459,
+      "optional": 91,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 597
+    }
+  }
+}

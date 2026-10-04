@@ -50,3 +50,14 @@ async def test_call_ocr_strips_trailing_slash(monkeypatch):
     monkeypatch.setattr(ocr_client.httpx, "AsyncClient", _FakeAsyncClient)
     await ocr_client.call_ocr(b"x")
     assert _FakeAsyncClient.last_url == "http://ocr:8000/ocr"
+
+
+async def test_invalid_ocr_does_not_expose_contact_data(monkeypatch):
+    import pytest
+
+    async def infer(_):
+        return {"fields": {"company": "PRIVATE-CONTACT\x00"}}
+
+    monkeypatch.setattr(ocr_client, "call_ocr", infer)
+    with pytest.raises(ValueError, match="^invalid OCR response$"):
+        await ocr_client.call_ocr_limited(b"image")
