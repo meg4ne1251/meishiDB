@@ -144,6 +144,14 @@ meishiDB/
 - 本番では `production.yml` を重ねる（`!reset`に対応したDocker Composeが必要）。Secure Cookie、API の再読込なし起動、Web の本番ビルドを適用する。`--profile proxy` だけでは開発モードのまま。
 - 初回の管理者登録は外部アクセスを制限した状態で済ませてから公開する。公開登録とパスキーの本人確認ポリシーは導入先で決定する。
 - WebAuthn は `WEBAUTHN_RP_ID` を本番ドメイン (例: `meishi.example.com`) に、`WEBAUTHN_ORIGIN` を `https://...` に設定
+- 更新系APIは`Origin`（なければ`Referer`）を`CORS_ORIGINS`と完全一致で検証する。
+  VPNのホスト名やIPアドレスからアクセスする場合も、実際のWeb URL
+  （例: `http://meishi.tailnet.example:3000`）を設定する。複数URLはカンマ区切り。
+  ブラウザ由来ヘッダーのないCLI・スキャナは引き続き利用できる。
+- パスワードログイン、登録、パスキーログインのbegin/finishは、接続元・エンドポイントごとに
+  60秒で20回まで。超過時は429と`Retry-After`を返す。制限とパスキーチャレンジは
+  単一APIプロセス内で管理する。プロキシの送信元IPを受ける構成では利用者全員で制限を共有する。
+  複数ワーカーや利用者ごとの制限が必要な構成では共有ストアと信頼するプロキシの設定が必要。
 - 公開 URL に出すなら Caddy + 自動 TLS（`deploy/Caddyfile`）
 - 監査ログ（`audit_logs` テーブル）は append-only。MVP では削除エンドポイント無し
 - `card.export` は監査ログに必ず記録される（CSV/vCard ともに）
@@ -175,3 +183,7 @@ CSVはExcel等の表計算ソフトでの閲覧向けです。数式の開始文
 
 画像アップロードとOCRは15 MiB、25百万画素、最長辺10,000 pxが上限です。
 API・OCRの受信ボディはmultipart分を含め16 MiBまでです。
+
+Meilisearch検索は200件ずつ取得し、ページ送り・CSV/vCardにも同じ結果を使います。
+1,000件の上限に到達した場合はPostgreSQLの部分一致検索へ切り替えます。
+その場合はOCR全文も検索しますが、Meilisearchのタイプミス補正は適用されません。

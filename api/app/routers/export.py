@@ -126,7 +126,7 @@ def _vcard_bytes(cards: list[Card]) -> bytes:
         if f is None:
             continue
         out.extend(_vcard_for(f))
-    return "\r\n".join(out).encode("utf-8")
+    return ("\r\n".join(out) + "\r\n").encode("utf-8") if out else b""
 
 
 def _vesc(value: str | None) -> str:
@@ -134,6 +134,8 @@ def _vesc(value: str | None) -> str:
         return ""
     return (
         value.replace("\\", "\\\\")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
         .replace(";", "\\;")
         .replace(",", "\\,")
         .replace("\n", "\\n")

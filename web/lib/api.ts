@@ -188,8 +188,8 @@ export const cardsApi = {
   geo: (scope: "owned" | "shared" | "all" = "owned", cookieHeader?: string) =>
     api<CardGeoResponse>(`/cards/geo${qsFor({ scope })}`, { cookieHeader }),
   geocode: (id: string) => api<Card>(`/cards/${id}/geocode`, { method: "POST" }),
-  imageUrl: (id: string, side: "front" | "back" = "front", thumb = false) =>
-    `/api/cards/${id}/image${qsFor({ side, thumb: thumb ? "true" : "" })}`,
+  imageUrl: (id: string, side: "front" | "back" = "front", thumb = false, version?: string) =>
+    `/api/cards/${id}/image${qsFor({ side, thumb: thumb ? "true" : "", v: version })}`,
 
   favorite: (id: string, on: boolean) =>
     api<void>(`/cards/${id}/favorite`, { method: on ? "POST" : "DELETE" }),

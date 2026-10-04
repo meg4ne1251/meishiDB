@@ -7,15 +7,18 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import secrets
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from webauthn import (
     generate_authentication_options,
@@ -38,6 +41,7 @@ from app.deps import get_current_user
 from app.models.session import Session
 from app.models.user import User, WebauthnCredential
 from app.schemas.auth import CurrentUser
+from app.schemas.webauthn import FinishRequest, LoginBeginRequest, RegisterFinishRequest
 from app.services import audit
 
 router = APIRouter(prefix="/webauthn", tags=["webauthn"])
@@ -45,10 +49,13 @@ router = APIRouter(prefix="/webauthn", tags=["webauthn"])
 # challenge_id → (challenge_b64, user_id, expires_at_epoch)
 _CHALLENGES: dict[str, tuple[str, str | None, float]] = {}
 _CHALLENGE_TTL = 300  # 5 分
+_MAX_CHALLENGES = 4096
 
 
 def _save_challenge(challenge: bytes, user_id: str | None) -> str:
     _gc_challenges()
+    if len(_CHALLENGES) >= _MAX_CHALLENGES:
+        raise HTTPException(status_code=503, detail="too many pending challenges; retry later")
     cid = secrets.token_urlsafe(24)
     _CHALLENGES[cid] = (
         base64.urlsafe_b64encode(challenge).decode().rstrip("="),
@@ -128,14 +135,14 @@ async def register_begin(
 @router.post("/register/finish")
 async def register_finish(
     request: Request,
-    payload: dict = Body(...),
+    payload: RegisterFinishRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     settings = get_settings()
-    cid = payload.get("challenge_id")
-    credential = payload.get("credential")
-    nickname = payload.get("nickname")
+    cid = payload.challenge_id
+    credential = payload.credential
+    nickname = payload.nickname
     if not cid or not credential:
         raise HTTPException(status_code=400, detail="challenge_id and credential are required")
 
@@ -170,7 +177,11 @@ async def register_finish(
         target_type="user",
         target_id=user.id,
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="credential already registered")
     await db.refresh(cred)
     return {"id": str(cred.id), "nickname": cred.nickname}
 
@@ -221,11 +232,11 @@ async def delete_credential(
 
 @router.post("/login/begin")
 async def login_begin(
-    payload: dict = Body(default_factory=dict),
+    payload: LoginBeginRequest = Body(default_factory=LoginBeginRequest),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     settings = get_settings()
-    email = (payload or {}).get("email")
+    email = payload.email
     allow: list[PublicKeyCredentialDescriptor] = []
 
     if email:
@@ -252,25 +263,35 @@ async def login_begin(
 async def login_finish(
     request: Request,
     response: Response,
-    payload: dict = Body(...),
+    payload: FinishRequest,
     db: AsyncSession = Depends(get_db),
 ) -> CurrentUser:
     settings = get_settings()
-    cid = payload.get("challenge_id")
-    credential = payload.get("credential")
+    cid = payload.challenge_id
+    credential = payload.credential
     if not cid or not credential:
         raise HTTPException(status_code=400, detail="challenge_id and credential are required")
 
-    challenge, _ = _pop_challenge(cid)
+    challenge, registration_user = _pop_challenge(cid)
+    if registration_user is not None:
+        raise HTTPException(status_code=400, detail="challenge purpose mismatch")
 
     raw_id_b64 = credential.get("rawId") or credential.get("id")
     if not raw_id_b64:
         raise HTTPException(status_code=400, detail="credential id missing")
+    if (
+        not isinstance(raw_id_b64, str) or len(raw_id_b64) > 2048
+        or re.fullmatch(r"[A-Za-z0-9_-]+={0,2}", raw_id_b64) is None
+    ):
+        raise HTTPException(status_code=400, detail="invalid credential id")
     pad = "=" * (-len(raw_id_b64) % 4)
-    raw_id = base64.urlsafe_b64decode(raw_id_b64 + pad)
+    try:
+        raw_id = base64.b64decode(raw_id_b64 + pad, altchars=b"-_", validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="invalid credential id")
 
     cred_row = await db.scalar(
-        select(WebauthnCredential).where(WebauthnCredential.credential_id == raw_id)
+        select(WebauthnCredential).where(WebauthnCredential.credential_id == raw_id).with_for_update()
     )
     if cred_row is None:
         raise HTTPException(status_code=401, detail="unknown credential")

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Camera, ImagePlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -22,8 +22,22 @@ export function CardImageCapture({ onPicked, disabled, label = "名刺を撮影"
   const cameraRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => () => {
+    if (preview) URL.revokeObjectURL(preview);
+  }, [preview]);
 
   function handle(file: File) {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setError("JPEG・PNG・WebP形式の画像を選択してください。");
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      setError("画像は15 MiB以下にしてください。");
+      return;
+    }
+    setError(null);
     const url = URL.createObjectURL(file);
     setPreview(url);
     onPicked(file, url);
@@ -54,7 +68,7 @@ export function CardImageCapture({ onPicked, disabled, label = "名刺を撮影"
       <input
         ref={cameraRef}
         type="file"
-        accept="image/*"
+        accept="image/jpeg,image/png,image/webp"
         capture="environment"
         className="hidden"
         onChange={(e) => {
@@ -66,7 +80,7 @@ export function CardImageCapture({ onPicked, disabled, label = "名刺を撮影"
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept="image/jpeg,image/png,image/webp"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -75,6 +89,7 @@ export function CardImageCapture({ onPicked, disabled, label = "名刺を撮影"
         }}
       />
 
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {preview && (
         <div className="overflow-hidden rounded-lg border border-border">
           {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -148,14 +148,24 @@ async def search_card_ids(viewer_id: UUID, query: str) -> list[UUID] | None:
         client = _get_async_client()
         if client is None:
             return None
-        result = await client.index(_INDEX).search(
-            query,
-            limit=200,
-            filter=f'owner_id = "{viewer_id}" OR shared_with = "{viewer_id}"',
-            attributes_to_retrieve=["id"],
-        )
-        hits = result.hits or []
-        return [UUID(h["id"]) for h in hits]
+        ids: list[UUID] = []
+        # The caller applies DB filters and pagination after this lookup, so a
+        # single 200-hit page is insufficient. Meili defaults to maxTotalHits=1000;
+        # at that boundary fall back to SQL rather than returning a partial set.
+        while len(ids) < 1000:
+            result = await client.index(_INDEX).search(
+                query,
+                limit=200,
+                offset=len(ids),
+                filter=f'owner_id = "{viewer_id}" OR shared_with = "{viewer_id}"',
+                attributes_to_retrieve=["id"],
+            )
+            hits = result.hits or []
+            ids.extend(UUID(h["id"]) for h in hits)
+            if len(hits) < 200:
+                return ids
+        logger.info("meili search reached hit limit; falling back to SQL")
+        return None
     except Exception as e:
         logger.warning("meili search failed: %s", e)
         return None

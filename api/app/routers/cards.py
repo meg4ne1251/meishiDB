@@ -18,6 +18,7 @@ from fastapi import (
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
 
 from app.core.db import SessionLocal, get_db
@@ -87,6 +88,13 @@ async def _serialize(
         )
     ) is not None
 
+    can_edit = card.owner_id == viewer_id
+    if not can_edit:
+        permission = await db.scalar(select(CardShare.permission).where(
+            CardShare.card_id == card.id, CardShare.shared_with == viewer_id
+        ))
+        can_edit = permission == "edit"
+
     return CardSummary(
         id=card.id,
         owner_id=card.owner_id,
@@ -100,6 +108,7 @@ async def _serialize(
         tags=tags,
         is_favorite=is_fav,
         shared=shared,
+        can_edit=can_edit,
     )
 
 
@@ -133,13 +142,12 @@ async def _geocode_card_in_background(card_id: UUID) -> None:
 
 
 async def _ensure_access(
-    db: AsyncSession, card_id: UUID, user: User, *, need_edit: bool = False
+    db: AsyncSession, card_id: UUID, user: User, *, need_edit: bool = False, lock: bool = False
 ) -> tuple[Card, bool]:
-    card = await db.scalar(
-        select(Card)
-        .options(selectinload(Card.fields))
-        .where(Card.id == card_id)
-    )
+    stmt = select(Card).options(selectinload(Card.fields)).where(Card.id == card_id)
+    if lock:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    card = await db.scalar(stmt)
     if card is None:
         raise HTTPException(status_code=404, detail="card not found")
 
@@ -326,7 +334,7 @@ async def update_card(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CardDetail:
-    card, shared = await _ensure_access(db, card_id, user, need_edit=True)
+    card, shared = await _ensure_access(db, card_id, user, need_edit=True, lock=True)
 
     if payload.status is not None:
         if payload.status not in CARD_STATUSES:
@@ -492,17 +500,17 @@ async def get_card_image(
     if not key:
         raise HTTPException(status_code=404, detail="image not found")
 
-    if thumb and side == "front":
-        thumb_key = key.rsplit(".", 1)[0] + "_512.webp"
-        try:
-            data, ct = await run_in_threadpool(storage.get_card_image, thumb_key, thumb=True)
-        except Exception:
+    try:
+        if thumb and side == "front":
+            thumb_key = key.rsplit(".", 1)[0] + "_512.webp"
+            try:
+                data, ct = await run_in_threadpool(storage.get_card_image, thumb_key, thumb=True)
+            except Exception:
+                data, ct = await run_in_threadpool(storage.get_card_image, key)
+        else:
             data, ct = await run_in_threadpool(storage.get_card_image, key)
-    else:
-        try:
-            data, ct = await run_in_threadpool(storage.get_card_image, key)
-        except Exception as e:
-            raise HTTPException(status_code=404, detail=f"image not found: {e}")
+    except Exception:
+        raise HTTPException(status_code=404, detail="image not found")
 
     return Response(content=data, media_type=ct, headers={"Cache-Control": "private, no-store"})
 
@@ -595,6 +603,15 @@ async def geocode_card(
 
 async def _apply_ocr_result(db: AsyncSession, card: Card, result: dict, background_tasks: BackgroundTasks) -> None:
     """OCR の出力（{fields, confidence, raw_text}）を card_fields に適用。"""
+    # Reload after inference, which can take tens of seconds. Serialize with PATCH
+    # so OCR only fills fields that are still empty, preserving concurrent edits.
+    current = await db.scalar(
+        select(Card).where(Card.id == card.id).with_for_update()
+        .options(selectinload(Card.fields)).execution_options(populate_existing=True)
+    )
+    if current is None:
+        raise HTTPException(status_code=404, detail="card not found")
+    card = current
     fields = result.get("fields") or {}
     confidence = result.get("confidence") or {}
     raw_text = result.get("raw_text") or ""
@@ -610,7 +627,8 @@ async def _apply_ocr_result(db: AsyncSession, card: Card, result: dict, backgrou
 
     card.fields.raw_ocr_text = raw_text
     card.fields.ocr_confidence = confidence
-    card.status = "ocr_done"
+    if card.status not in {"confirmed", "archived"}:
+        card.status = "ocr_done"
     card.updated_at = datetime.now(timezone.utc)
     if card.fields.address != old_address:
         background_tasks.add_task(_geocode_card_in_background, card.id)
@@ -768,12 +786,10 @@ async def add_favorite(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await _ensure_access(db, card_id, user)
-    exists = await db.scalar(
-        select(Favorite.card_id).where(Favorite.user_id == user.id, Favorite.card_id == card_id)
+    await db.execute(
+        insert(Favorite).values(user_id=user.id, card_id=card_id).on_conflict_do_nothing()
     )
-    if exists is None:
-        db.add(Favorite(user_id=user.id, card_id=card_id))
-        await db.commit()
+    await db.commit()
 
 
 @router.delete("/{card_id}/favorite", status_code=status.HTTP_204_NO_CONTENT)
@@ -809,7 +825,7 @@ async def create_share(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ShareInfo:
-    card = await db.get(Card, card_id)
+    card = await db.scalar(select(Card).where(Card.id == card_id).with_for_update())
     if card is None or card.owner_id != user.id:
         raise HTTPException(status_code=404, detail="card not found")
 
@@ -865,10 +881,10 @@ async def delete_share(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    card = await db.scalar(select(Card).where(Card.id == card_id).with_for_update())
     share = await db.get(CardShare, share_id)
     if share is None or share.card_id != card_id:
         raise HTTPException(status_code=404, detail="share not found")
-    card = await db.get(Card, card_id)
     if card is None or card.owner_id != user.id:
         raise HTTPException(status_code=403, detail="only owner can revoke")
     revoked_with = share.shared_with

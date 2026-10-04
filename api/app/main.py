@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 from app.core.body_limit import BodyLimitMiddleware
+from app.core.browser_security import BrowserSecurityMiddleware
+from app.core.auth_limit import AuthRateLimitMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
@@ -27,6 +29,8 @@ def create_app() -> FastAPI:
     app = FastAPI(title="meishiDB API", version="0.1.0", lifespan=lifespan)
 
     app.add_middleware(BodyLimitMiddleware)
+    app.add_middleware(AuthRateLimitMiddleware)
+    app.add_middleware(BrowserSecurityMiddleware, trusted_origins=settings.cors_origins_list)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,

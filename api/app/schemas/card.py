@@ -62,6 +62,7 @@ class CardSummary(BaseModel):
     tags: list[TagSummary] = Field(default_factory=list)
     is_favorite: bool = False
     shared: bool = False
+    can_edit: bool = False
 
 
 class CardListResponse(BaseModel):

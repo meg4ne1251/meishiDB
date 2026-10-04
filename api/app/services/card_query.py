@@ -14,6 +14,7 @@ SEARCH_FIELDS = (
     "phone",
     "mobile",
     "address",
+    "raw_ocr_text",
 )
 
 

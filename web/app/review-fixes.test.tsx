@@ -8,6 +8,7 @@ import { Providers } from "@/components/providers";
 import CardDetailPage from "./cards/[id]/page";
 import CardsPage from "./cards/page";
 import HomePage from "./page";
+import ScanPage from "./scan/page";
 vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "card-1" }), useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
@@ -118,4 +119,58 @@ it("redirects authenticated users to cards", async () => {
 it("redirects unauthenticated users to login", async () => {
   vi.spyOn(authApi, "me").mockRejectedValue(new Error("unauthenticated"));
   await expect(HomePage()).rejects.toThrow("redirect:/login");
+});
+
+it("shows shared images and prevents writes to a view share", async () => {
+  vi.mocked(cardsApi.get).mockResolvedValue({ ...blank, shared: true, can_edit: false, image_front_key: "front.jpg" });
+  const update = vi.spyOn(cardsApi, "update");
+  await render(<CardDetailPage />);
+  await waitFor(() => expect(container.querySelector<HTMLImageElement>('img[alt="front"]')).not.toBeNull());
+  expect(container.querySelector<HTMLInputElement>("#person_name")!.disabled).toBe(true);
+  expect(container.textContent).toContain("項目の編集はできません");
+  expect(container.textContent).not.toContain("表面を撮影");
+  await submit();
+  expect(update).not.toHaveBeenCalled();
+});
+
+it("lets edit shares save their changes", async () => {
+  vi.mocked(cardsApi.get).mockResolvedValue({ ...blank, shared: true, can_edit: true });
+  vi.spyOn(cardsApi, "update").mockResolvedValue(blank);
+  await render(<CardDetailPage />);
+  await waitFor(() => expect(container.querySelector("#person_name")).not.toBeNull());
+  expect(container.querySelector<HTMLInputElement>("#person_name")!.disabled).toBe(false);
+  await fill("person_name", "Shared edit"); await submit();
+  await waitFor(() => expect(cardsApi.update).toHaveBeenCalledWith("card-1", { fields: { person_name: "Shared edit" }, tag_ids: undefined }));
+});
+
+it("shows save errors and preserves the draft", async () => {
+  vi.spyOn(cardsApi, "update").mockRejectedValue(new Error("offline"));
+  await render(<CardDetailPage />);
+  await waitFor(() => expect(container.querySelector("#person_name")).not.toBeNull());
+  await fill("person_name", "Unsaved"); await submit();
+  await waitFor(() => expect(container.querySelector('[role="alert"]')?.textContent).toContain("操作に失敗しました"));
+  expect(container.querySelector<HTMLInputElement>("#person_name")!.value).toBe("Unsaved");
+});
+
+it("updates image URLs after replacement", async () => {
+  vi.mocked(cardsApi.get).mockResolvedValue({ ...blank, image_front_key: "front.jpg" });
+  await render(<CardDetailPage />);
+  await waitFor(() => expect(container.querySelector('img[alt="front"]')).not.toBeNull());
+  const before = container.querySelector<HTMLImageElement>('img[alt="front"]')!.src;
+  await act(async () => client.setQueryData(["card", "card-1"], { ...blank, image_front_key: "front.jpg", updated_at: "2026-10-04T00:00:00Z" }));
+  await waitFor(() => expect(container.querySelector<HTMLImageElement>('img[alt="front"]')!.src).not.toBe(before));
+});
+
+it("reuses the created card when retrying a failed scan upload", async () => {
+  vi.spyOn(cardsApi, "create").mockResolvedValue(blank);
+  vi.spyOn(cardsApi, "uploadImage").mockRejectedValue(new Error("offline"));
+  await render(<ScanPage />);
+  // The mocked capture component has no label on the scan page.
+  await act(async () => container.querySelector<HTMLButtonElement>("button")!.click());
+  await click("登録");
+  await waitFor(() => expect(container.textContent).toContain("登録に失敗しました"));
+  await click("登録");
+  await waitFor(() => expect(cardsApi.uploadImage).toHaveBeenCalledTimes(2));
+  expect(cardsApi.create).toHaveBeenCalledTimes(1);
+  expect(cardsApi.uploadImage).toHaveBeenLastCalledWith("card-1", expect.any(File), expect.any(Object));
 });

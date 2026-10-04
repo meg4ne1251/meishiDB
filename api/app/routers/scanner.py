@@ -105,4 +105,5 @@ async def import_scanned(
         tags=[],
         is_favorite=False,
         shared=False,
+        can_edit=True,
     )

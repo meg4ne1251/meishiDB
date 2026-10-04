@@ -63,6 +63,7 @@ export interface Card {
   tags: Tag[];
   is_favorite: boolean;
   shared: boolean;
+  can_edit?: boolean;
 }
 
 export interface PasskeyCredential {

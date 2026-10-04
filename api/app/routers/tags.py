@@ -53,7 +53,7 @@ async def update_tag(
         raise HTTPException(status_code=404, detail="tag not found")
     if payload.name is not None:
         tag.name = payload.name
-    if payload.color is not None:
+    if "color" in payload.model_fields_set:
         tag.color = payload.color
     try:
         await db.commit()

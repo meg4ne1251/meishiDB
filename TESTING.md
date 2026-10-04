@@ -4,12 +4,12 @@
 
 | コンポーネント | フレームワーク | テスト数 | 必要なもの |
 |---|---|---|---|
-| `api/` (FastAPI) | pytest + pytest-asyncio | 182 | **Docker**（テスト用 `postgres:16` を自動起動） |
-| `ocr/` | pytest | 46 (+1 skip) | なし（PaddleOCR は不要・モック） |
+| `api/` (FastAPI) | pytest + pytest-asyncio | 211 | **Docker**（テスト用 `postgres:16` を自動起動） |
+| `ocr/` | pytest | 70 (+1 skip) | なし（PaddleOCR は不要・モック） |
 | `scanner-watcher/` | pytest | 19 | なし |
-| `web/` (Next.js) | Vitest + jsdom | 34 | Node.js |
+| `web/` (Next.js) | Vitest + jsdom | 39 | Node.js |
 
-合計 **261 テスト**（別途 OCR 実モデルのテスト1件は依存未導入時に skip）。
+合計 **339 テスト**（別途 OCR 実モデルのテスト1件は依存未導入時に skip）。
 
 ---
 
@@ -49,6 +49,10 @@ python3 -m venv .venv
 お気に入り / アクセス制御）、`cards/geo`、`shares`（権限）、`memos`（CRUD / 本文検証 / 共有・投稿者権限 / 共有解除 / 監査）、画像アップロード・OCR、
 `scanner` 取り込み、`export`（CSV/vCard）、`users` 検索、`webauthn`、監査ログ、
 および `geocoder` / `ocr_client` / `search_index` サービス。
+
+`test_review_20261004.py`では送信元検証、認証制限、不正パスキー入力、
+同時登録・共有・お気に入り、OCR中の手動編集、200件を超える検索、
+画像欠落、vCard改行、タグ色の消去、共有先の編集権限も検証します。
 
 MinIO・Meilisearch・OCR サービス・ジオコーダは外部依存なので `monkeypatch` でスタブ化し、
 ルーターの分岐を検証します。
@@ -93,6 +97,7 @@ python3 -m venv .venv
 Vitest でテストします。`fetch` はモック。
 `components/card-memos` は React DOM で表示・追加失敗時の入力保持・再試行・編集・削除確認・閲覧権限・本文の安全な表示も検証します。
 `app/review-fixes.test.tsx`では認証キャッシュ分離、OCR後のフォーム更新、編集中の項目とタグの保護、変更項目だけの送信、一覧のページ送り、トップのリダイレクトを検証します。
+共有画像の閲覧・view/editのフォーム制御・保存失敗時の入力保持・画像差し替え・スキャン再試行も検証します。
 `tests/sw.test.ts`はService Workerの実ファイルをVMで実行し、認証データの除外、静的ファイルのキャッシュ、旧キャッシュの削除を検証します。
 
 ```bash

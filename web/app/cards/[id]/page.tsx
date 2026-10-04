@@ -129,6 +129,11 @@ export default function CardDetailPage() {
     },
   });
 
+  const unshare = useMutation({
+    mutationFn: (shareId: string) => cardsApi.unshare(cardId, shareId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["card", cardId, "shares"] }),
+  });
+
   const uploadFront = useMutation({
     mutationFn: (file: File) =>
       cardsApi.uploadImage(cardId, file, { side: "front", runOcr: true, filename: file.name }),
@@ -158,6 +163,9 @@ export default function CardDetailPage() {
   });
 
   const imageBusy = updateMutation.isPending || uploadFront.isPending || uploadBack.isPending || rerunOcr.isPending;
+  const canEdit = card?.can_edit ?? !card?.shared;
+  const operationError = updateMutation.error || uploadFront.error || uploadBack.error ||
+    rerunOcr.error || deleteMutation.error || favMutation.error || unshare.error;
 
   if (isLoading) return <p className="text-sm text-muted-foreground">読み込み中...</p>;
   if (!card) return <p className="text-sm">名刺が見つかりません</p>;
@@ -205,7 +213,13 @@ export default function CardDetailPage() {
         </div>
       </div>
 
-      {!card.shared && (
+      {operationError && (
+        <p role="alert" className="text-sm text-destructive">
+          操作に失敗しました。入力内容・権限・接続を確認して再度お試しください。
+        </p>
+      )}
+
+      {(!card.shared || card.image_front_key || card.image_back_key) && (
         <Card>
           <CardHeader>
             <CardTitle>画像</CardTitle>
@@ -223,7 +237,7 @@ export default function CardDetailPage() {
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={cardsApi.imageUrl(cardId, "front", true)}
+                      src={cardsApi.imageUrl(cardId, "front", true, card.updated_at)}
                       alt="front"
                       className="max-h-48 w-full object-contain bg-black/40"
                     />
@@ -231,11 +245,11 @@ export default function CardDetailPage() {
                 ) : (
                   <p className="text-xs text-muted-foreground">未アップロード</p>
                 )}
-                <CardImageCapture
+                {!card.shared && <CardImageCapture
                   label="表面を撮影"
                   disabled={imageBusy}
                   onPicked={(f) => uploadFront.mutate(f)}
-                />
+                />}
               </div>
               <div className="flex flex-col gap-2">
                 <span className="text-xs text-muted-foreground">裏面</span>
@@ -248,7 +262,7 @@ export default function CardDetailPage() {
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={cardsApi.imageUrl(cardId, "back")}
+                      src={cardsApi.imageUrl(cardId, "back", false, card.updated_at)}
                       alt="back"
                       className="max-h-48 w-full object-contain bg-black/40"
                     />
@@ -256,15 +270,15 @@ export default function CardDetailPage() {
                 ) : (
                   <p className="text-xs text-muted-foreground">未アップロード</p>
                 )}
-                <CardImageCapture
+                {!card.shared && <CardImageCapture
                   label="裏面を撮影"
                   disabled={imageBusy}
                   onPicked={(f) => uploadBack.mutate(f)}
-                />
+                />}
               </div>
             </div>
 
-            {card.image_front_key && (
+            {!card.shared && card.image_front_key && (
               <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-xs text-muted-foreground">
                 <span>
                   ステータス: {card.status}
@@ -289,7 +303,7 @@ export default function CardDetailPage() {
 
       <form
         onSubmit={form.handleSubmit((values) => {
-          if (!imageBusy) updateMutation.mutate(values);
+          if (canEdit && !imageBusy) updateMutation.mutate(values);
         })}
         className="flex flex-col gap-6"
       >
@@ -305,7 +319,7 @@ export default function CardDetailPage() {
                   className={`flex flex-col gap-1.5 ${f.col === 2 ? "sm:col-span-2" : ""}`}
                 >
                   <Label htmlFor={f.name}>{f.label}</Label>
-                  <Input id={f.name} disabled={updateMutation.isPending} {...form.register(f.name)} />
+                  <Input id={f.name} disabled={!canEdit || updateMutation.isPending} {...form.register(f.name)} />
                 </div>
               ))}
             </div>
@@ -417,10 +431,8 @@ export default function CardDetailPage() {
                         size="sm"
                         variant="ghost"
                         type="button"
-                        onClick={async () => {
-                          await cardsApi.unshare(cardId, s.id);
-                          qc.invalidateQueries({ queryKey: ["card", cardId, "shares"] });
-                        }}
+                        disabled={unshare.isPending}
+                        onClick={() => unshare.mutate(s.id)}
                       >
                         解除
                       </Button>
@@ -432,11 +444,12 @@ export default function CardDetailPage() {
           </Card>
         )}
 
-        <div className="flex justify-end gap-2">
+        {!canEdit && <p className="text-sm text-muted-foreground">閲覧権限で共有されています。項目の編集はできません。</p>}
+        {canEdit && <div className="flex justify-end gap-2">
           <Button type="submit" disabled={imageBusy}>
             {updateMutation.isPending ? "保存中..." : "保存"}
           </Button>
-        </div>
+        </div>}
       </form>
       <CardMemos key={cardId} cardId={cardId} />
     </div>

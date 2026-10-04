@@ -230,6 +230,14 @@ def app(_database):
 async def client_factory(app):
     """cookie jar が独立した AsyncClient を必要なだけ作るファクトリ。"""
     from httpx import ASGITransport, AsyncClient
+    from app.core.auth_limit import AuthRateLimitMiddleware
+
+    # Authentication attempts belong to each test, just like its DB data.
+    middleware = app.middleware_stack
+    while middleware is not None:
+        if isinstance(middleware, AuthRateLimitMiddleware):
+            middleware.attempts.clear()
+        middleware = getattr(middleware, "app", None)
 
     clients: list[AsyncClient] = []
 

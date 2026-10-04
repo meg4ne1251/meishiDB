@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { cardsApi } from "@/lib/api";
 import { CardImageCapture } from "@/components/card-image-capture";
@@ -13,15 +13,21 @@ export default function ScanPage() {
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const createdId = useRef<string | null>(null);
+  const submitting = useRef(false);
 
   async function submit() {
-    if (!file) return;
+    if (!file || submitting.current) return;
+    submitting.current = true;
     setError(null);
     setProgress("名刺を作成中...");
     try {
-      const created = await cardsApi.create({ source: "camera" });
+      if (!createdId.current) {
+        const created = await cardsApi.create({ source: "camera" });
+        createdId.current = created.id;
+      }
       setProgress("画像をアップロード & OCR 実行中...");
-      const card = await cardsApi.uploadImage(created.id, file, {
+      const card = await cardsApi.uploadImage(createdId.current, file, {
         side: "front",
         runOcr: true,
         filename: file.name || "card.jpg",
@@ -30,6 +36,8 @@ export default function ScanPage() {
     } catch (e) {
       setError("登録に失敗しました");
       setProgress(null);
+    } finally {
+      submitting.current = false;
     }
   }
 
@@ -47,7 +55,7 @@ export default function ScanPage() {
           <CardTitle>画像</CardTitle>
         </CardHeader>
         <CardContent>
-          <CardImageCapture onPicked={(f) => setFile(f)} />
+          <CardImageCapture disabled={!!progress} onPicked={(f) => setFile(f)} />
         </CardContent>
       </Card>
 

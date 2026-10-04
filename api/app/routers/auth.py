@@ -44,13 +44,13 @@ async def register(
     """
     settings = get_settings()
 
-    existing = await db.scalar(select(User).where(User.email == payload.email))
-    if existing is not None:
-        raise HTTPException(status_code=400, detail="email already registered")
-
     # 初回 admin 競合を防ぐためアドバイザリロックでシリアライズする。
     # ロックはトランザクション終了時に自動解放される。
     await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('register_first_user'))"))
+    # Check inside the lock: a concurrent registration may have committed while waiting.
+    existing = await db.scalar(select(User).where(User.email == payload.email))
+    if existing is not None:
+        raise HTTPException(status_code=400, detail="email already registered")
     user_count = await db.scalar(select(User.id).limit(1))
     role = "member" if user_count is not None else "admin"
 
